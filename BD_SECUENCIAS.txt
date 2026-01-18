@@ -1,0 +1,56 @@
+INICIALIZAR SECUENCIAS
+
+CREATE SEQUENCE seq_usuarios START 1;
+CREATE SEQUENCE seq_empleados START 1;
+CREATE SEQUENCE seq_roles START 4;  -- Ya tienes 3 roles iniciales
+CREATE SEQUENCE seq_departamentos START 1;
+CREATE SEQUENCE seq_horarios START 1;
+CREATE SEQUENCE seq_tolerancias START 2;  -- Ya tienes 1
+CREATE SEQUENCE seq_asistencias START 1;
+CREATE SEQUENCE seq_incidencias START 1;
+CREATE SEQUENCE seq_credenciales START 1;
+CREATE SEQUENCE seq_escritorio START 1;
+CREATE SEQUENCE seq_movil START 1;
+CREATE SEQUENCE seq_biometrico START 1;
+CREATE SEQUENCE seq_solicitudes START 1;
+CREATE SEQUENCE seq_eventos START 1;
+CREATE SEQUENCE seq_configuraciones START 2;  -- Ya tienes 1
+CREATE SEQUENCE seq_empresas START 2;  -- Ya tienes 1
+CREATE SEQUENCE seq_modulos START 1;
+CREATE SEQUENCE seq_permisos START 29;  -- Ya tienes 28
+CREATE SEQUENCE seq_usuarios_roles START 2;  -- Ya tienes 1
+CREATE SEQUENCE seq_empleados_departamentos START 1;
+CREATE SEQUENCE seq_auditoria START 1;
+
+
+Resetear TODAS las secuencias a estado inicial:
+
+-- Resetear todas las secuencias del sistema checador
+ALTER SEQUENCE seq_usuarios RESTART WITH 1;
+ALTER SEQUENCE seq_empleados RESTART WITH 1;
+ALTER SEQUENCE seq_roles RESTART WITH 4;
+ALTER SEQUENCE seq_departamentos RESTART WITH 1;
+ALTER SEQUENCE seq_horarios RESTART WITH 1;
+ALTER SEQUENCE seq_tolerancias RESTART WITH 2;
+ALTER SEQUENCE seq_asistencias RESTART WITH 1;
+ALTER SEQUENCE seq_incidencias RESTART WITH 1;
+ALTER SEQUENCE seq_credenciales RESTART WITH 1;
+ALTER SEQUENCE seq_escritorio RESTART WITH 1;
+ALTER SEQUENCE seq_movil RESTART WITH 1;
+ALTER SEQUENCE seq_biometrico RESTART WITH 1;
+ALTER SEQUENCE seq_solicitudes RESTART WITH 1;
+ALTER SEQUENCE seq_eventos RESTART WITH 1;
+ALTER SEQUENCE seq_configuraciones RESTART WITH 2;
+ALTER SEQUENCE seq_empresas RESTART WITH 2;
+ALTER SEQUENCE seq_modulos RESTART WITH 1;
+ALTER SEQUENCE seq_permisos RESTART WITH 29;
+ALTER SEQUENCE seq_usuarios_roles RESTART WITH 2;
+ALTER SEQUENCE seq_empleados_departamentos RESTART WITH 1;
+ALTER SEQUENCE seq_auditoria RESTART WITH 1;
+
+Resetear basado en el MAX actual de la tabla (útil después de migrar datos):
+
+-- Ejemplo: sincronizar secuencia con datos existentes
+SELECT setval('seq_usuarios', COALESCE(
+    (SELECT MAX(CAST(SUBSTRING(id FROM 4) AS INTEGER)) FROM usuarios), 0
+) + 1);

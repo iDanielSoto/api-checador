@@ -1,0 +1,24 @@
+import { Router } from 'express';
+import {
+    getHorarios,
+    getHorarioById,
+    createHorario,
+    updateHorario,
+    deleteHorario,
+    asignarHorario
+} from '../controllers/horarios.controller.js';
+import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { requirePermiso } from '../middleware/permissions.middleware.js';
+
+const router = Router();
+
+router.use(verificarAutenticacion);
+
+router.get('/', requirePermiso('HORARIO_VER'), getHorarios);
+router.get('/:id', requirePermiso('HORARIO_VER'), getHorarioById);
+router.post('/', requirePermiso('HORARIO_CREAR'), createHorario);
+router.put('/:id', requirePermiso('HORARIO_MODIFICAR'), updateHorario);
+router.delete('/:id', requirePermiso('HORARIO_SOFTDELETE'), deleteHorario);
+router.post('/:id/asignar', requirePermiso('HORARIO_ASIGNAR'), asignarHorario);
+
+export default router;

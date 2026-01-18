@@ -1,0 +1,477 @@
+import bcrypt from 'bcrypt';
+import { pool } from '../config/db.js';
+import { generateId, generateSecurityKey, ID_PREFIXES } from '../utils/idGenerator.js';
+
+/**
+ * GET /api/usuarios
+ * Obtiene lista de usuarios con filtros opcionales
+ */
+export async function getUsuarios(req, res) {
+    try {
+        const { estado, es_empleado, buscar, limit = 50, offset = 0 } = req.query;
+
+        let query = `
+            SELECT
+                u.id,
+                u.usuario,
+                u.correo,
+                u.nombre,
+                u.foto,
+                u.telefono,
+                u.estado_cuenta,
+                u.es_empleado,
+                u.fecha_registro,
+                e.id as empleado_id,
+                e.rfc,
+                e.nss
+            FROM usuarios u
+            LEFT JOIN empleados e ON e.usuario_id = u.id
+            WHERE 1=1
+        `;
+        const params = [];
+        let paramIndex = 1;
+
+        if (estado) {
+            query += ` AND u.estado_cuenta = $${paramIndex++}`;
+            params.push(estado);
+        }
+
+        if (es_empleado !== undefined) {
+            query += ` AND u.es_empleado = $${paramIndex++}`;
+            params.push(es_empleado === 'true');
+        }
+
+        if (buscar) {
+            query += ` AND (u.nombre ILIKE $${paramIndex} OR u.usuario ILIKE $${paramIndex} OR u.correo ILIKE $${paramIndex})`;
+            params.push(`%${buscar}%`);
+            paramIndex++;
+        }
+
+        query += ` ORDER BY u.fecha_registro DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`;
+        params.push(parseInt(limit), parseInt(offset));
+
+        const resultado = await pool.query(query, params);
+
+        // Contar total
+        let countQuery = `SELECT COUNT(*) FROM usuarios u WHERE 1=1`;
+        const countParams = [];
+        let countIndex = 1;
+
+        if (estado) {
+            countQuery += ` AND u.estado_cuenta = $${countIndex++}`;
+            countParams.push(estado);
+        }
+        if (es_empleado !== undefined) {
+            countQuery += ` AND u.es_empleado = $${countIndex++}`;
+            countParams.push(es_empleado === 'true');
+        }
+        if (buscar) {
+            countQuery += ` AND (u.nombre ILIKE $${countIndex} OR u.usuario ILIKE $${countIndex} OR u.correo ILIKE $${countIndex})`;
+            countParams.push(`%${buscar}%`);
+        }
+
+        const countResult = await pool.query(countQuery, countParams);
+
+        res.json({
+            success: true,
+            data: resultado.rows,
+            total: parseInt(countResult.rows[0].count),
+            limit: parseInt(limit),
+            offset: parseInt(offset)
+        });
+
+    } catch (error) {
+        console.error('Error en getUsuarios:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener usuarios'
+        });
+    }
+}
+
+/**
+ * GET /api/usuarios/:id
+ * Obtiene un usuario por ID
+ */
+export async function getUsuarioById(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            SELECT
+                u.id,
+                u.usuario,
+                u.correo,
+                u.nombre,
+                u.foto,
+                u.telefono,
+                u.estado_cuenta,
+                u.es_empleado,
+                u.fecha_registro,
+                e.id as empleado_id,
+                e.rfc,
+                e.nss,
+                e.horario_id
+            FROM usuarios u
+            LEFT JOIN empleados e ON e.usuario_id = u.id
+            WHERE u.id = $1
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado'
+            });
+        }
+
+        // Obtener roles del usuario
+        const rolesResult = await pool.query(`
+            SELECT r.id, r.nombre, r.descripcion, r.es_admin, r.es_empleado, r.posicion
+            FROM roles r
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            WHERE ur.usuario_id = $1 AND ur.es_activo = true
+        `, [id]);
+
+        res.json({
+            success: true,
+            data: {
+                ...resultado.rows[0],
+                roles: rolesResult.rows
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en getUsuarioById:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener usuario'
+        });
+    }
+}
+
+/**
+ * POST /api/usuarios
+ * Crea un nuevo usuario
+ */
+export async function createUsuario(req, res) {
+    const client = await pool.connect();
+
+    try {
+        const {
+            usuario,
+            correo,
+            contraseña,
+            nombre,
+            foto,
+            telefono,
+            es_empleado = false,
+            roles = [],
+            // Datos de empleado (si es_empleado = true)
+            rfc,
+            nss,
+            horario_id
+        } = req.body;
+
+        // Validaciones
+        if (!usuario || !correo || !contraseña || !nombre) {
+            return res.status(400).json({
+                success: false,
+                message: 'Usuario, correo, contraseña y nombre son requeridos'
+            });
+        }
+
+        // Verificar unicidad
+        const existe = await client.query(
+            'SELECT id FROM usuarios WHERE usuario = $1 OR correo = $2',
+            [usuario, correo]
+        );
+
+        if (existe.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'El usuario o correo ya existe'
+            });
+        }
+
+        await client.query('BEGIN');
+
+        // Generar ID y hash
+        const id = await generateId(ID_PREFIXES.USUARIO);
+        const hashPassword = await bcrypt.hash(contraseña, 10);
+        const clave_seguridad = generateSecurityKey();
+
+        // Insertar usuario
+        await client.query(`
+            INSERT INTO usuarios (id, usuario, correo, contraseña, nombre, foto, telefono, estado_cuenta, es_empleado, clave_seguridad)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'activo', $8, $9)
+        `, [id, usuario, correo, hashPassword, nombre, foto, telefono, es_empleado, clave_seguridad]);
+
+        // Si es empleado, crear registro en empleados
+        let empleado_id = null;
+        if (es_empleado) {
+            empleado_id = await generateId(ID_PREFIXES.EMPLEADO);
+            await client.query(`
+                INSERT INTO empleados (id, rfc, nss, horario_id, usuario_id)
+                VALUES ($1, $2, $3, $4, $5)
+            `, [empleado_id, rfc, nss, horario_id, id]);
+        }
+
+        // Asignar roles
+        for (const rol_id of roles) {
+            const urlId = await generateId(ID_PREFIXES.USUARIO_ROL);
+            await client.query(`
+                INSERT INTO usuarios_roles (id, usuario_id, rol_id, es_activo)
+                VALUES ($1, $2, $3, true)
+            `, [urlId, id, rol_id]);
+        }
+
+        await client.query('COMMIT');
+
+        res.status(201).json({
+            success: true,
+            message: 'Usuario creado correctamente',
+            data: {
+                id,
+                usuario,
+                correo,
+                nombre,
+                es_empleado,
+                empleado_id
+            }
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en createUsuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al crear usuario'
+        });
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * PUT /api/usuarios/:id
+ * Actualiza un usuario existente
+ */
+export async function updateUsuario(req, res) {
+    try {
+        const { id } = req.params;
+        const {
+            usuario,
+            correo,
+            nombre,
+            foto,
+            telefono,
+            estado_cuenta
+        } = req.body;
+
+        // Verificar que existe
+        const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [id]);
+        if (existe.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado'
+            });
+        }
+
+        // Verificar unicidad de usuario/correo si se cambian
+        if (usuario || correo) {
+            const duplicado = await pool.query(
+                'SELECT id FROM usuarios WHERE (usuario = $1 OR correo = $2) AND id != $3',
+                [usuario, correo, id]
+            );
+            if (duplicado.rows.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El usuario o correo ya está en uso'
+                });
+            }
+        }
+
+        const resultado = await pool.query(`
+            UPDATE usuarios SET
+                usuario = COALESCE($1, usuario),
+                correo = COALESCE($2, correo),
+                nombre = COALESCE($3, nombre),
+                foto = COALESCE($4, foto),
+                telefono = COALESCE($5, telefono),
+                estado_cuenta = COALESCE($6, estado_cuenta)
+            WHERE id = $7
+            RETURNING id, usuario, correo, nombre, foto, telefono, estado_cuenta, es_empleado
+        `, [usuario, correo, nombre, foto, telefono, estado_cuenta, id]);
+
+        res.json({
+            success: true,
+            message: 'Usuario actualizado correctamente',
+            data: resultado.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error en updateUsuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al actualizar usuario'
+        });
+    }
+}
+
+/**
+ * DELETE /api/usuarios/:id
+ * Soft delete - cambia estado a 'baja'
+ */
+export async function deleteUsuario(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE usuarios SET estado_cuenta = 'baja'
+            WHERE id = $1 AND estado_cuenta != 'baja'
+            RETURNING id
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado o ya dado de baja'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Usuario dado de baja correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en deleteUsuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al eliminar usuario'
+        });
+    }
+}
+
+/**
+ * GET /api/usuarios/:id/roles
+ * Obtiene los roles de un usuario
+ */
+export async function getRolesDeUsuario(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            SELECT
+                r.id,
+                r.nombre,
+                r.descripcion,
+                r.permisos_bitwise,
+                r.es_admin,
+                r.es_empleado,
+                r.posicion,
+                ur.fecha_registro as fecha_asignacion
+            FROM roles r
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            WHERE ur.usuario_id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion DESC
+        `, [id]);
+
+        res.json({
+            success: true,
+            data: resultado.rows
+        });
+
+    } catch (error) {
+        console.error('Error en getRolesDeUsuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener roles del usuario'
+        });
+    }
+}
+
+/**
+ * POST /api/usuarios/:id/roles
+ * Asigna un rol a un usuario
+ */
+export async function asignarRol(req, res) {
+    try {
+        const { id } = req.params;
+        const { rol_id } = req.body;
+
+        if (!rol_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'rol_id es requerido'
+            });
+        }
+
+        // Verificar si ya tiene el rol
+        const existe = await pool.query(
+            'SELECT id FROM usuarios_roles WHERE usuario_id = $1 AND rol_id = $2',
+            [id, rol_id]
+        );
+
+        if (existe.rows.length > 0) {
+            // Reactivar si estaba inactivo
+            await pool.query(
+                'UPDATE usuarios_roles SET es_activo = true WHERE usuario_id = $1 AND rol_id = $2',
+                [id, rol_id]
+            );
+        } else {
+            const urlId = await generateId(ID_PREFIXES.USUARIO_ROL);
+            await pool.query(`
+                INSERT INTO usuarios_roles (id, usuario_id, rol_id, es_activo)
+                VALUES ($1, $2, $3, true)
+            `, [urlId, id, rol_id]);
+        }
+
+        res.json({
+            success: true,
+            message: 'Rol asignado correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en asignarRol:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al asignar rol'
+        });
+    }
+}
+
+/**
+ * DELETE /api/usuarios/:id/roles/:rolId
+ * Remueve un rol de un usuario
+ */
+export async function removerRol(req, res) {
+    try {
+        const { id, rolId } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE usuarios_roles SET es_activo = false
+            WHERE usuario_id = $1 AND rol_id = $2 AND es_activo = true
+            RETURNING id
+        `, [id, rolId]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'El usuario no tiene asignado ese rol'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Rol removido correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en removerRol:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al remover rol'
+        });
+    }
+}
