@@ -58,8 +58,8 @@ export async function createDepartamento(req, res) {
             id,
             nombre,
             descripcion,
-            ubicacion ? JSON.stringify(ubicacion) : null,
-            jefes ? JSON.stringify(jefes) : null,
+            ubicacion || null,
+            jefes || null,
             color
         ]);
         res.status(201).json({ success: true, message: 'Departamento creado', data: resultado.rows[0] });
@@ -82,8 +82,8 @@ export async function updateDepartamento(req, res) {
         `, [
             nombre,
             descripcion,
-            ubicacion !== undefined ? JSON.stringify(ubicacion) : null,
-            jefes !== undefined ? JSON.stringify(jefes) : null,
+            ubicacion !== undefined ? ubicacion : null,
+            jefes !== undefined ? jefes : null,
             color,
             es_activo,
             id
