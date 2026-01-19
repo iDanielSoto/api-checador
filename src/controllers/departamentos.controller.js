@@ -54,7 +54,14 @@ export async function createDepartamento(req, res) {
         const resultado = await pool.query(`
             INSERT INTO departamentos (id, nombre, descripcion, ubicacion, jefes, color, es_activo)
             VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING *
-        `, [id, nombre, descripcion, ubicacion, jefes, color]);
+        `, [
+            id,
+            nombre,
+            descripcion,
+            ubicacion ? JSON.stringify(ubicacion) : null,
+            jefes ? JSON.stringify(jefes) : null,
+            color
+        ]);
         res.status(201).json({ success: true, message: 'Departamento creado', data: resultado.rows[0] });
     } catch (error) {
         console.error('Error en createDepartamento:', error);
@@ -72,7 +79,15 @@ export async function updateDepartamento(req, res) {
                 ubicacion = COALESCE($3, ubicacion), jefes = COALESCE($4, jefes),
                 color = COALESCE($5, color), es_activo = COALESCE($6, es_activo)
             WHERE id = $7 RETURNING *
-        `, [nombre, descripcion, ubicacion, jefes, color, es_activo, id]);
+        `, [
+            nombre,
+            descripcion,
+            ubicacion !== undefined ? JSON.stringify(ubicacion) : null,
+            jefes !== undefined ? JSON.stringify(jefes) : null,
+            color,
+            es_activo,
+            id
+        ]);
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
         }
