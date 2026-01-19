@@ -257,6 +257,8 @@ export async function createUsuario(req, res) {
  * Actualiza un usuario existente
  */
 export async function updateUsuario(req, res) {
+    const client = await pool.connect();
+
     try {
         const { id } = req.params;
         const {
@@ -265,25 +267,37 @@ export async function updateUsuario(req, res) {
             nombre,
             foto,
             telefono,
-            estado_cuenta
+            estado_cuenta,
+            es_empleado,
+            // Datos de empleado
+            rfc,
+            nss,
+            horario_id
         } = req.body;
 
         // Verificar que existe
-        const existe = await pool.query('SELECT id FROM usuarios WHERE id = $1', [id]);
+        const existe = await client.query(
+            'SELECT id, es_empleado FROM usuarios WHERE id = $1',
+            [id]
+        );
         if (existe.rows.length === 0) {
+            client.release();
             return res.status(404).json({
                 success: false,
                 message: 'Usuario no encontrado'
             });
         }
 
+        const esEmpleadoActual = existe.rows[0].es_empleado;
+
         // Verificar unicidad de usuario/correo si se cambian
         if (usuario || correo) {
-            const duplicado = await pool.query(
+            const duplicado = await client.query(
                 'SELECT id FROM usuarios WHERE (usuario = $1 OR correo = $2) AND id != $3',
                 [usuario, correo, id]
             );
             if (duplicado.rows.length > 0) {
+                client.release();
                 return res.status(400).json({
                     success: false,
                     message: 'El usuario o correo ya está en uso'
@@ -291,17 +305,47 @@ export async function updateUsuario(req, res) {
             }
         }
 
-        const resultado = await pool.query(`
+        await client.query('BEGIN');
+
+        // Actualizar usuario
+        const resultado = await client.query(`
             UPDATE usuarios SET
                 usuario = COALESCE($1, usuario),
                 correo = COALESCE($2, correo),
                 nombre = COALESCE($3, nombre),
                 foto = COALESCE($4, foto),
                 telefono = COALESCE($5, telefono),
-                estado_cuenta = COALESCE($6, estado_cuenta)
-            WHERE id = $7
+                estado_cuenta = COALESCE($6, estado_cuenta),
+                es_empleado = COALESCE($7, es_empleado)
+            WHERE id = $8
             RETURNING id, usuario, correo, nombre, foto, telefono, estado_cuenta, es_empleado
-        `, [usuario, correo, nombre, foto, telefono, estado_cuenta, id]);
+        `, [usuario, correo, nombre, foto, telefono, estado_cuenta, es_empleado, id]);
+
+        // Manejar cambios en es_empleado
+        if (es_empleado !== undefined) {
+            if (es_empleado && !esEmpleadoActual) {
+                // Crear registro de empleado
+                const empleadoId = await generateId(ID_PREFIXES.EMPLEADO);
+                await client.query(`
+                    INSERT INTO empleados (id, rfc, nss, horario_id, usuario_id)
+                    VALUES ($1, $2, $3, $4, $5)
+                `, [empleadoId, rfc || null, nss || null, horario_id || null, id]);
+            } else if (!es_empleado && esEmpleadoActual) {
+                // Eliminar registro de empleado
+                await client.query('DELETE FROM empleados WHERE usuario_id = $1', [id]);
+            } else if (es_empleado && esEmpleadoActual) {
+                // Actualizar datos de empleado
+                await client.query(`
+                    UPDATE empleados SET
+                        rfc = COALESCE($1, rfc),
+                        nss = COALESCE($2, nss),
+                        horario_id = $3
+                    WHERE usuario_id = $4
+                `, [rfc, nss, horario_id || null, id]);
+            }
+        }
+
+        await client.query('COMMIT');
 
         res.json({
             success: true,
@@ -310,11 +354,14 @@ export async function updateUsuario(req, res) {
         });
 
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error en updateUsuario:', error);
         res.status(500).json({
             success: false,
             message: 'Error al actualizar usuario'
         });
+    } finally {
+        client.release();
     }
 }
 
