@@ -522,3 +522,83 @@ export async function removerRol(req, res) {
         });
     }
 }
+
+/**
+ * GET /api/usuarios/username/:username
+ * Obtiene un usuario por su username con datos completos para perfil
+ */
+export async function getUsuarioByUsername(req, res) {
+    try {
+        const { username } = req.params;
+
+        const resultado = await pool.query(`
+            SELECT
+                u.id,
+                u.usuario,
+                u.correo,
+                u.nombre,
+                u.foto,
+                u.telefono,
+                u.estado_cuenta,
+                u.es_empleado,
+                u.fecha_registro,
+                e.rfc,
+                e.nss,
+                e.horario_id
+            FROM usuarios u
+            LEFT JOIN empleados e ON e.usuario_id = u.id
+            WHERE u.usuario = $1
+        `, [username]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado'
+            });
+        }
+
+        const usuario = resultado.rows[0];
+
+        // Obtener roles del usuario
+        const rolesResult = await pool.query(`
+            SELECT r.nombre, r.descripcion, r.es_admin, r.es_empleado
+            FROM roles r
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            WHERE ur.usuario_id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion DESC
+        `, [usuario.id]);
+
+        // Obtener horario si es empleado
+        let horario = null;
+        if (usuario.horario_id) {
+            const horarioResult = await pool.query(`
+                SELECT h.fecha_inicio, h.fecha_fin, h.es_activo, h.configuracion
+                FROM horarios h
+                WHERE h.id = $1
+            `, [usuario.horario_id]);
+
+            if (horarioResult.rows.length > 0) {
+                horario = horarioResult.rows[0];
+            }
+        }
+
+        // Remover ID del response para el perfil público
+        const { id, horario_id, ...usuarioSinIds } = usuario;
+
+        res.json({
+            success: true,
+            data: {
+                ...usuarioSinIds,
+                roles: rolesResult.rows,
+                horario
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en getUsuarioByUsername:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener usuario'
+        });
+    }
+}

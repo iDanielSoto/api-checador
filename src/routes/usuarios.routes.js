@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
     getUsuarios,
     getUsuarioById,
+    getUsuarioByUsername,
     createUsuario,
     updateUsuario,
     deleteUsuario,
@@ -19,6 +20,8 @@ router.use(verificarAutenticacion);
 
 // CRUD usuarios
 router.get('/', requirePermiso('USUARIO_VER'), getUsuarios);
+// Ruta específica para obtener por username (debe ir ANTES de /:id)
+router.get('/username/:username', getUsuarioByUsername);
 router.get('/:id', requirePermisoOrSelf('id', 'USUARIO_VER'), getUsuarioById);
 router.post('/', requirePermiso('USUARIO_CREAR'), createUsuario);
 router.put('/:id', requirePermisoOrSelf('id', 'USUARIO_MODIFICAR'), updateUsuario);
