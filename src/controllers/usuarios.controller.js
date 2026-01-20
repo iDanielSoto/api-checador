@@ -132,11 +132,25 @@ export async function getUsuarioById(req, res) {
             WHERE ur.usuario_id = $1 AND ur.es_activo = true
         `, [id]);
 
+        // Obtener departamentos del empleado
+        let departamentos = [];
+        const usuario = resultado.rows[0];
+        if (usuario.empleado_id) {
+            const deptosResult = await pool.query(`
+                SELECT d.id, d.nombre, d.color
+                FROM departamentos d
+                INNER JOIN empleados_departamentos ed ON ed.departamento_id = d.id
+                WHERE ed.empleado_id = $1 AND ed.es_activo = true
+            `, [usuario.empleado_id]);
+            departamentos = deptosResult.rows;
+        }
+
         res.json({
             success: true,
             data: {
-                ...resultado.rows[0],
-                roles: rolesResult.rows
+                ...usuario,
+                roles: rolesResult.rows,
+                departamentos
             }
         });
 
@@ -169,7 +183,8 @@ export async function createUsuario(req, res) {
             // Datos de empleado (si es_empleado = true)
             rfc,
             nss,
-            horario_id
+            horario_id,
+            departamentos_ids = []
         } = req.body;
 
         // Validaciones
@@ -214,6 +229,15 @@ export async function createUsuario(req, res) {
                 INSERT INTO empleados (id, rfc, nss, horario_id, usuario_id)
                 VALUES ($1, $2, $3, $4, $5)
             `, [empleado_id, rfc, nss, horario_id, id]);
+
+            // Asignar departamentos al empleado
+            for (const depto_id of departamentos_ids) {
+                const edId = await generateId(ID_PREFIXES.EMP_DEPTO);
+                await client.query(`
+                    INSERT INTO empleados_departamentos (id, empleado_id, departamento_id, es_activo)
+                    VALUES ($1, $2, $3, true)
+                `, [edId, empleado_id, depto_id]);
+            }
         }
 
         // Asignar roles
@@ -272,7 +296,8 @@ export async function updateUsuario(req, res) {
             // Datos de empleado
             rfc,
             nss,
-            horario_id
+            horario_id,
+            departamentos_ids
         } = req.body;
 
         // Verificar que existe
@@ -330,7 +355,25 @@ export async function updateUsuario(req, res) {
                     INSERT INTO empleados (id, rfc, nss, horario_id, usuario_id)
                     VALUES ($1, $2, $3, $4, $5)
                 `, [empleadoId, rfc || null, nss || null, horario_id || null, id]);
+
+                // Asignar departamentos al nuevo empleado
+                if (departamentos_ids && departamentos_ids.length > 0) {
+                    for (const depto_id of departamentos_ids) {
+                        const edId = await generateId(ID_PREFIXES.EMP_DEPTO);
+                        await client.query(`
+                            INSERT INTO empleados_departamentos (id, empleado_id, departamento_id, es_activo)
+                            VALUES ($1, $2, $3, true)
+                        `, [edId, empleadoId, depto_id]);
+                    }
+                }
             } else if (!es_empleado && esEmpleadoActual) {
+                // Obtener empleado_id antes de eliminar
+                const empResult = await client.query('SELECT id FROM empleados WHERE usuario_id = $1', [id]);
+                if (empResult.rows.length > 0) {
+                    const empleadoId = empResult.rows[0].id;
+                    // Eliminar relaciones de departamentos
+                    await client.query('DELETE FROM empleados_departamentos WHERE empleado_id = $1', [empleadoId]);
+                }
                 // Eliminar registro de empleado
                 await client.query('DELETE FROM empleados WHERE usuario_id = $1', [id]);
             } else if (es_empleado && esEmpleadoActual) {
@@ -342,6 +385,41 @@ export async function updateUsuario(req, res) {
                         horario_id = $3
                     WHERE usuario_id = $4
                 `, [rfc, nss, horario_id || null, id]);
+
+                // Sincronizar departamentos si se proporcionaron
+                if (departamentos_ids !== undefined) {
+                    const empResult = await client.query('SELECT id FROM empleados WHERE usuario_id = $1', [id]);
+                    if (empResult.rows.length > 0) {
+                        const empleadoId = empResult.rows[0].id;
+
+                        // Desactivar todos los departamentos actuales
+                        await client.query(`
+                            UPDATE empleados_departamentos SET es_activo = false
+                            WHERE empleado_id = $1
+                        `, [empleadoId]);
+
+                        // Activar o crear los departamentos seleccionados
+                        for (const depto_id of departamentos_ids) {
+                            const existe = await client.query(`
+                                SELECT id FROM empleados_departamentos
+                                WHERE empleado_id = $1 AND departamento_id = $2
+                            `, [empleadoId, depto_id]);
+
+                            if (existe.rows.length > 0) {
+                                await client.query(`
+                                    UPDATE empleados_departamentos SET es_activo = true
+                                    WHERE empleado_id = $1 AND departamento_id = $2
+                                `, [empleadoId, depto_id]);
+                            } else {
+                                const edId = await generateId(ID_PREFIXES.EMP_DEPTO);
+                                await client.query(`
+                                    INSERT INTO empleados_departamentos (id, empleado_id, departamento_id, es_activo)
+                                    VALUES ($1, $2, $3, true)
+                                `, [edId, empleadoId, depto_id]);
+                            }
+                        }
+                    }
+                }
             }
         }
 
