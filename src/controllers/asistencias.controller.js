@@ -9,8 +9,8 @@ export async function registrarAsistencia(req, res) {
     try {
         const {
             empleado_id,
-            dispositivo_origen,  // 'movil' o 'escritorio'
-            ubicacion            // Array [latitud, longitud] o null
+            dispositivo_origen,
+            ubicacion
         } = req.body;
 
         if (!empleado_id || !dispositivo_origen) {
@@ -36,40 +36,47 @@ export async function registrarAsistencia(req, res) {
             });
         }
 
-        const ahora = new Date();
-        const diaSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][ahora.getDay()];
+        // Obtener último registro del día
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
 
-        // Obtener configuración del horario para hoy
-        const horarioConfig = empleado.rows[0].configuracion;
-        let estado = 'puntual';
+        const ultimoRegistro = await pool.query(`
+            SELECT estado, fecha_registro
+            FROM asistencias
+            WHERE empleado_id = $1 AND DATE(fecha_registro) = DATE($2)
+            ORDER BY fecha_registro DESC
+            LIMIT 1
+        `, [empleado_id, new Date()]);
 
-        if (horarioConfig && horarioConfig[diaSemana]) {
-            const configDia = horarioConfig[diaSemana];
+        const esEntrada = ultimoRegistro.rows.length === 0 ||
+            ['salida_temprano', 'salida_puntual'].includes(ultimoRegistro.rows[0]?.estado);
 
-            if (!configDia.descanso && configDia.entrada) {
-                const [horaEntrada, minEntrada] = configDia.entrada.split(':').map(Number);
-                const horaLimite = new Date(ahora);
-                horaLimite.setHours(horaEntrada, minEntrada, 0, 0);
+        // Obtener tolerancia del rol del empleado
+        const toleranciaQuery = await pool.query(`
+            SELECT t.minutos_retardo, t.minutos_falta, t.permite_registro_anticipado, t.minutos_anticipado_max
+            FROM tolerancias t
+            INNER JOIN roles r ON r.tolerancia_id = t.id
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            INNER JOIN empleados e ON e.usuario_id = ur.usuario_id
+            WHERE e.id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion DESC
+            LIMIT 1
+        `, [empleado_id]);
 
-                // Obtener tolerancia del rol del empleado
-                const tolerancia = await pool.query(`
-                    SELECT t.minutos_retardo
-                    FROM tolerancias t
-                    INNER JOIN roles r ON r.tolerancia_id = t.id
-                    INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
-                    INNER JOIN empleados e ON e.usuario_id = ur.usuario_id
-                    WHERE e.id = $1 AND ur.es_activo = true
-                    LIMIT 1
-                `, [empleado_id]);
+        const tolerancia = toleranciaQuery.rows[0] || {
+            minutos_retardo: 10,
+            minutos_falta: 30,
+            permite_registro_anticipado: true,
+            minutos_anticipado_max: 60
+        };
 
-                const minutosTolerancia = tolerancia.rows[0]?.minutos_retardo || 10;
-                horaLimite.setMinutes(horaLimite.getMinutes() + minutosTolerancia);
-
-                if (ahora > horaLimite) {
-                    estado = 'retardo';
-                }
-            }
-        }
+        // Determinar estado según horario y tolerancias
+        const estado = calcularEstadoAsistencia(
+            empleado.rows[0].configuracion,
+            new Date(),
+            tolerancia,
+            esEntrada
+        );
 
         // Registrar asistencia
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
@@ -88,10 +95,10 @@ export async function registrarAsistencia(req, res) {
             VALUES ($1, $2, $3, 'asistencia', 'baja', $4, $5)
         `, [
             eventoId,
-            `Registro de asistencia - ${estado}`,
-            `${empleado.rows[0].nombre} registró asistencia`,
+            `Registro de ${esEntrada ? 'entrada' : 'salida'} - ${estado}`,
+            `${empleado.rows[0].nombre} registró ${esEntrada ? 'entrada' : 'salida'}`,
             empleado_id,
-            JSON.stringify({ asistencia_id: id, estado, dispositivo_origen })
+            JSON.stringify({ asistencia_id: id, estado, dispositivo_origen, tipo: esEntrada ? 'entrada' : 'salida' })
         ]);
 
         res.status(201).json({
@@ -99,7 +106,8 @@ export async function registrarAsistencia(req, res) {
             message: `Asistencia registrada como ${estado}`,
             data: {
                 ...resultado.rows[0],
-                empleado_nombre: empleado.rows[0].nombre
+                empleado_nombre: empleado.rows[0].nombre,
+                tipo: esEntrada ? 'entrada' : 'salida'
             }
         });
 
@@ -110,6 +118,117 @@ export async function registrarAsistencia(req, res) {
             message: 'Error al registrar asistencia'
         });
     }
+}
+
+/**
+ * Calcula el estado de la asistencia según horario y tolerancias
+ */
+function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEntrada) {
+    try {
+        if (!configuracionHorario) {
+            return esEntrada ? 'puntual' : 'salida_puntual';
+        }
+
+        const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+        const diaSemana = diasSemana[ahora.getDay()];
+
+        // Parsear configuración si es string
+        let config = typeof configuracionHorario === 'string'
+            ? JSON.parse(configuracionHorario)
+            : configuracionHorario;
+
+        let turnosHoy = [];
+
+        // Soportar estructura nueva (configuracion_semanal)
+        if (config.configuracion_semanal && config.configuracion_semanal[diaSemana]) {
+            turnosHoy = config.configuracion_semanal[diaSemana].map(t => ({
+                entrada: t.inicio,
+                salida: t.fin
+            }));
+        }
+        // Soportar estructura antigua (dias + turnos)
+        else if (config.dias && config.dias.includes(diaSemana)) {
+            turnosHoy = config.turnos || [];
+        }
+
+        // Si no hay turnos para hoy, es día de descanso
+        if (turnosHoy.length === 0) {
+            return esEntrada ? 'falta' : 'salida_puntual';
+        }
+
+        const horaActual = ahora.getHours() * 60 + ahora.getMinutes();
+
+        if (esEntrada) {
+            return calcularEstadoEntrada(turnosHoy, horaActual, tolerancia);
+        } else {
+            return calcularEstadoSalida(turnosHoy, horaActual);
+        }
+
+    } catch (error) {
+        console.error('Error calculando estado:', error);
+        return esEntrada ? 'puntual' : 'salida_puntual';
+    }
+}
+
+/**
+ * Calcula estado de ENTRADA con tolerancias
+ */
+function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
+    for (const turno of turnos) {
+        const [horaEntrada, minEntrada] = turno.entrada.split(':').map(Number);
+        const minEntradaTurno = horaEntrada * 60 + minEntrada;
+
+        const minutosAnticipado = tolerancia.minutos_anticipado_max || 60;
+        const inicioVentana = minEntradaTurno - minutosAnticipado;
+        const finToleranciaRetardo = minEntradaTurno + tolerancia.minutos_retardo;
+        const finToleranciaFalta = minEntradaTurno + tolerancia.minutos_falta;
+
+        // Dentro de ventana puntual (anticipado + tolerancia retardo)
+        if (horaActual >= inicioVentana && horaActual <= finToleranciaRetardo) {
+            return 'puntual';
+        }
+
+        // Dentro de tolerancia de retardo
+        if (horaActual > finToleranciaRetardo && horaActual <= finToleranciaFalta) {
+            return 'retardo';
+        }
+
+        // Después de tolerancia de falta pero antes de fin de turno
+        const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
+        const minSalidaTurno = horaSalida * 60 + minSalida;
+
+        if (horaActual > finToleranciaFalta && horaActual <= minSalidaTurno) {
+            return 'falta';
+        }
+    }
+
+    // Si no está en ninguna ventana
+    return 'falta';
+}
+
+/**
+ * Calcula estado de SALIDA
+ */
+function calcularEstadoSalida(turnos, horaActual) {
+    for (const turno of turnos) {
+        const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
+        const minSalidaTurno = horaSalida * 60 + minSalida;
+
+        const toleranciaSalida = 10;
+        const inicioVentanaSalida = minSalidaTurno - toleranciaSalida;
+
+        // Salida anticipada
+        if (horaActual < inicioVentanaSalida) {
+            return 'salida_temprano';
+        }
+
+        // Salida puntual
+        if (horaActual >= inicioVentanaSalida) {
+            return 'salida_puntual';
+        }
+    }
+
+    return 'salida_puntual';
 }
 
 /**
@@ -137,7 +256,17 @@ export async function getAsistencias(req, res) {
                 a.fecha_registro,
                 a.empleado_id,
                 u.nombre as empleado_nombre,
-                u.foto as empleado_foto
+                u.foto as empleado_foto,
+                CASE 
+                    WHEN (
+                        SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = a.empleado_id 
+                        AND DATE(a2.fecha_registro) = DATE(a.fecha_registro)
+                        AND a2.fecha_registro < a.fecha_registro
+                    ) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+                END as tipo
             FROM asistencias a
             INNER JOIN empleados e ON e.id = a.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
@@ -208,7 +337,17 @@ export async function getAsistenciasEmpleado(req, res) {
                 a.estado,
                 a.dispositivo_origen,
                 a.ubicacion,
-                a.fecha_registro
+                a.fecha_registro,
+                CASE 
+                    WHEN (
+                        SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = a.empleado_id 
+                        AND DATE(a2.fecha_registro) = DATE(a.fecha_registro)
+                        AND a2.fecha_registro < a.fecha_registro
+                    ) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+                END as tipo
             FROM asistencias a
             WHERE a.empleado_id = $1
         `;
@@ -234,7 +373,10 @@ export async function getAsistenciasEmpleado(req, res) {
             SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE estado = 'retardo') as retardos
+                COUNT(*) FILTER (WHERE estado = 'retardo') as retardos,
+                COUNT(*) FILTER (WHERE estado = 'falta') as faltas,
+                COUNT(*) FILTER (WHERE estado = 'salida_puntual') as salidas_puntuales,
+                COUNT(*) FILTER (WHERE estado = 'salida_temprano') as salidas_tempranas
             FROM asistencias
             WHERE empleado_id = $1
             ${fecha_inicio ? `AND fecha_registro >= '${fecha_inicio}'` : ''}
@@ -275,7 +417,17 @@ export async function getAsistenciasHoy(req, res) {
                 a.fecha_registro,
                 e.id as empleado_id,
                 u.nombre as empleado_nombre,
-                u.foto as empleado_foto
+                u.foto as empleado_foto,
+                CASE 
+                    WHEN (
+                        SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = a.empleado_id 
+                        AND DATE(a2.fecha_registro) = DATE(a.fecha_registro)
+                        AND a2.fecha_registro < a.fecha_registro
+                    ) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+                END as tipo
             FROM asistencias a
             INNER JOIN empleados e ON e.id = a.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
@@ -299,7 +451,10 @@ export async function getAsistenciasHoy(req, res) {
         const resumen = {
             total: resultado.rows.length,
             puntuales: resultado.rows.filter(a => a.estado === 'puntual').length,
-            retardos: resultado.rows.filter(a => a.estado === 'retardo').length
+            retardos: resultado.rows.filter(a => a.estado === 'retardo').length,
+            faltas: resultado.rows.filter(a => a.estado === 'falta').length,
+            salidas_puntuales: resultado.rows.filter(a => a.estado === 'salida_puntual').length,
+            salidas_tempranas: resultado.rows.filter(a => a.estado === 'salida_temprano').length
         };
 
         res.json({
