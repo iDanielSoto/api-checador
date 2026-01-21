@@ -1,10 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 
-/**
- * POST /api/asistencias/registrar
- * Registra una entrada o salida de asistencia
- */
 export async function registrarAsistencia(req, res) {
     try {
         const {
@@ -20,7 +16,6 @@ export async function registrarAsistencia(req, res) {
             });
         }
 
-        // Verificar que el empleado existe y está activo
         const empleado = await pool.query(`
             SELECT e.id, e.horario_id, u.nombre, h.configuracion
             FROM empleados e
@@ -36,22 +31,29 @@ export async function registrarAsistencia(req, res) {
             });
         }
 
-        // Obtener último registro del día
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-
         const ultimoRegistro = await pool.query(`
-            SELECT estado, fecha_registro
+            SELECT
+                estado,
+                fecha_registro,
+                CASE
+                    WHEN (
+                        SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = $1
+                        AND DATE(a2.fecha_registro) = DATE(fecha_registro)
+                        AND a2.fecha_registro < asistencias.fecha_registro
+                    ) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+                END as tipo
             FROM asistencias
-            WHERE empleado_id = $1 AND DATE(fecha_registro) = DATE($2)
+            WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE
             ORDER BY fecha_registro DESC
             LIMIT 1
-        `, [empleado_id, new Date()]);
+        `, [empleado_id]);
 
         const esEntrada = ultimoRegistro.rows.length === 0 ||
-            ['salida_temprano', 'salida_puntual'].includes(ultimoRegistro.rows[0]?.estado);
+            ultimoRegistro.rows[0].tipo === 'salida';
 
-        // Obtener tolerancia del rol del empleado
         const toleranciaQuery = await pool.query(`
             SELECT t.minutos_retardo, t.minutos_falta, t.permite_registro_anticipado, t.minutos_anticipado_max
             FROM tolerancias t
@@ -70,7 +72,6 @@ export async function registrarAsistencia(req, res) {
             minutos_anticipado_max: 60
         };
 
-        // Determinar estado según horario y tolerancias
         const estado = calcularEstadoAsistencia(
             empleado.rows[0].configuracion,
             new Date(),
@@ -78,7 +79,6 @@ export async function registrarAsistencia(req, res) {
             esEntrada
         );
 
-        // Registrar asistencia
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         const ubicacionArray = ubicacion ? `{${ubicacion.join(',')}}` : null;
 
@@ -88,7 +88,6 @@ export async function registrarAsistencia(req, res) {
             RETURNING *
         `, [id, estado, dispositivo_origen, ubicacionArray, empleado_id]);
 
-        // Registrar evento
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(`
             INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
@@ -120,9 +119,6 @@ export async function registrarAsistencia(req, res) {
     }
 }
 
-/**
- * Calcula el estado de la asistencia según horario y tolerancias
- */
 function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEntrada) {
     try {
         if (!configuracionHorario) {
@@ -132,26 +128,21 @@ function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEnt
         const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
         const diaSemana = diasSemana[ahora.getDay()];
 
-        // Parsear configuración si es string
         let config = typeof configuracionHorario === 'string'
             ? JSON.parse(configuracionHorario)
             : configuracionHorario;
 
         let turnosHoy = [];
 
-        // Soportar estructura nueva (configuracion_semanal)
         if (config.configuracion_semanal && config.configuracion_semanal[diaSemana]) {
             turnosHoy = config.configuracion_semanal[diaSemana].map(t => ({
                 entrada: t.inicio,
                 salida: t.fin
             }));
-        }
-        // Soportar estructura antigua (dias + turnos)
-        else if (config.dias && config.dias.includes(diaSemana)) {
+        } else if (config.dias && config.dias.includes(diaSemana)) {
             turnosHoy = config.turnos || [];
         }
 
-        // Si no hay turnos para hoy, es día de descanso
         if (turnosHoy.length === 0) {
             return esEntrada ? 'falta' : 'salida_puntual';
         }
@@ -170,9 +161,6 @@ function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEnt
     }
 }
 
-/**
- * Calcula estado de ENTRADA con tolerancias
- */
 function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
     for (const turno of turnos) {
         const [horaEntrada, minEntrada] = turno.entrada.split(':').map(Number);
@@ -183,17 +171,14 @@ function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
         const finToleranciaRetardo = minEntradaTurno + tolerancia.minutos_retardo;
         const finToleranciaFalta = minEntradaTurno + tolerancia.minutos_falta;
 
-        // Dentro de ventana puntual (anticipado + tolerancia retardo)
         if (horaActual >= inicioVentana && horaActual <= finToleranciaRetardo) {
             return 'puntual';
         }
 
-        // Dentro de tolerancia de retardo
         if (horaActual > finToleranciaRetardo && horaActual <= finToleranciaFalta) {
             return 'retardo';
         }
 
-        // Después de tolerancia de falta pero antes de fin de turno
         const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
         const minSalidaTurno = horaSalida * 60 + minSalida;
 
@@ -202,13 +187,9 @@ function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
         }
     }
 
-    // Si no está en ninguna ventana
     return 'falta';
 }
 
-/**
- * Calcula estado de SALIDA
- */
 function calcularEstadoSalida(turnos, horaActual) {
     for (const turno of turnos) {
         const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
@@ -217,12 +198,10 @@ function calcularEstadoSalida(turnos, horaActual) {
         const toleranciaSalida = 10;
         const inicioVentanaSalida = minSalidaTurno - toleranciaSalida;
 
-        // Salida anticipada
         if (horaActual < inicioVentanaSalida) {
             return 'salida_temprano';
         }
 
-        // Salida puntual
         if (horaActual >= inicioVentanaSalida) {
             return 'salida_puntual';
         }
@@ -231,10 +210,6 @@ function calcularEstadoSalida(turnos, horaActual) {
     return 'salida_puntual';
 }
 
-/**
- * GET /api/asistencias
- * Obtiene registros de asistencia con filtros
- */
 export async function getAsistencias(req, res) {
     try {
         const {
@@ -257,7 +232,7 @@ export async function getAsistencias(req, res) {
                 a.empleado_id,
                 u.nombre as empleado_nombre,
                 u.foto as empleado_foto,
-                CASE 
+                CASE
                     WHEN (
                         SELECT COUNT(*) 
                         FROM asistencias a2 
@@ -322,10 +297,6 @@ export async function getAsistencias(req, res) {
     }
 }
 
-/**
- * GET /api/asistencias/empleado/:empleadoId
- * Obtiene asistencias de un empleado específico
- */
 export async function getAsistenciasEmpleado(req, res) {
     try {
         const { empleadoId } = req.params;
@@ -338,7 +309,7 @@ export async function getAsistenciasEmpleado(req, res) {
                 a.dispositivo_origen,
                 a.ubicacion,
                 a.fecha_registro,
-                CASE 
+                CASE
                     WHEN (
                         SELECT COUNT(*) 
                         FROM asistencias a2 
@@ -368,7 +339,6 @@ export async function getAsistenciasEmpleado(req, res) {
 
         const resultado = await pool.query(query, params);
 
-        // Estadísticas
         const stats = await pool.query(`
             SELECT
                 COUNT(*) as total,
@@ -398,10 +368,6 @@ export async function getAsistenciasEmpleado(req, res) {
     }
 }
 
-/**
- * GET /api/asistencias/hoy
- * Obtiene resumen de asistencias del día actual
- */
 export async function getAsistenciasHoy(req, res) {
     try {
         const { departamento_id } = req.query;
@@ -418,7 +384,7 @@ export async function getAsistenciasHoy(req, res) {
                 e.id as empleado_id,
                 u.nombre as empleado_nombre,
                 u.foto as empleado_foto,
-                CASE 
+                CASE
                     WHEN (
                         SELECT COUNT(*) 
                         FROM asistencias a2 
@@ -447,7 +413,6 @@ export async function getAsistenciasHoy(req, res) {
 
         const resultado = await pool.query(query, params);
 
-        // Resumen
         const resumen = {
             total: resultado.rows.length,
             puntuales: resultado.rows.filter(a => a.estado === 'puntual').length,
