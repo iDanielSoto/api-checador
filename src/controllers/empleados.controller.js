@@ -317,6 +317,65 @@ export async function removerDepartamento(req, res) {
 }
 
 /**
+ * GET /api/empleados/:id/horario
+ * Obtiene el horario activo de un empleado
+ */
+export async function getHorarioDeEmpleado(req, res) {
+    try {
+        const { id } = req.params;
+
+        const empleado = await pool.query(
+            'SELECT id, horario_id FROM empleados WHERE id = $1',
+            [id]
+        );
+
+        if (empleado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Empleado no encontrado'
+            });
+        }
+
+        if (!empleado.rows[0].horario_id) {
+            return res.status(404).json({
+                success: false,
+                message: 'El empleado no tiene un horario asignado'
+            });
+        }
+
+        const horario = await pool.query(`
+            SELECT
+                id,
+                fecha_inicio,
+                fecha_fin,
+                configuracion,
+                es_activo
+            FROM horarios
+            WHERE id = $1
+        `, [empleado.rows[0].horario_id]);
+
+        if (horario.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Horario no encontrado'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: horario.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error en getHorarioDeEmpleado:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener horario del empleado'
+        });
+    }
+}
+
+/**
  * GET /api/empleados/buscar/rfc/:rfc
  * Busca empleado por RFC
  */

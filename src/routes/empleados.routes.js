@@ -6,6 +6,7 @@ import {
     getDepartamentosDeEmpleado,
     asignarDepartamento,
     removerDepartamento,
+    getHorarioDeEmpleado,
     buscarPorRFC,
     buscarPorNSS
 } from '../controllers/empleados.controller.js';
@@ -30,5 +31,9 @@ router.put('/:id', requirePermiso('USUARIO_MODIFICAR'), updateEmpleado);
 router.get('/:id/departamentos', requirePermisoOrSelf('id', 'DEPARTAMENTO_VER'), getDepartamentosDeEmpleado);
 router.post('/:id/departamentos', requirePermiso('DEPARTAMENTO_ASIGNAR'), asignarDepartamento);
 router.delete('/:id/departamentos/:deptoId', requirePermiso('DEPARTAMENTO_ASIGNAR'), removerDepartamento);
+
+// Obtener horario de empleado
+router.get('/:id/horario', requirePermisoOrSelf('id', 'HORARIO_VER'), getHorarioDeEmpleado);
+
 
 export default router;

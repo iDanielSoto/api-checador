@@ -333,18 +333,22 @@ export async function updateUsuario(req, res) {
         await client.query('BEGIN');
 
         // Actualizar usuario
+        // Para foto: cadena vacía = eliminar foto, null/undefined = mantener, valor = actualizar
+        const fotoValue = foto === '' ? null : foto;
+        const fotoQuery = foto === '' ? '$4' : 'COALESCE($4, foto)';
+
         const resultado = await client.query(`
             UPDATE usuarios SET
                 usuario = COALESCE($1, usuario),
                 correo = COALESCE($2, correo),
                 nombre = COALESCE($3, nombre),
-                foto = COALESCE($4, foto),
+                foto = ${fotoQuery},
                 telefono = COALESCE($5, telefono),
                 estado_cuenta = COALESCE($6, estado_cuenta),
                 es_empleado = COALESCE($7, es_empleado)
             WHERE id = $8
             RETURNING id, usuario, correo, nombre, foto, telefono, estado_cuenta, es_empleado
-        `, [usuario, correo, nombre, foto, telefono, estado_cuenta, es_empleado, id]);
+        `, [usuario, correo, nombre, fotoValue, telefono, estado_cuenta, es_empleado, id]);
 
         // Manejar cambios en es_empleado
         if (es_empleado !== undefined) {

@@ -19,6 +19,7 @@ export async function getRoles(req, res) {
                 r.es_empleado,
                 r.fecha_registro,
                 r.tolerancia_id,
+                r.color,
                 t.nombre as tolerancia_nombre,
                 (SELECT COUNT(*) FROM usuarios_roles ur WHERE ur.rol_id = r.id AND ur.es_activo = true) as usuarios_count
             FROM roles r
@@ -65,6 +66,7 @@ export async function getRolById(req, res) {
                 r.es_empleado,
                 r.fecha_registro,
                 r.tolerancia_id,
+                r.color,
                 t.nombre as tolerancia_nombre
             FROM roles r
             LEFT JOIN tolerancias t ON t.id = r.tolerancia_id
@@ -119,7 +121,8 @@ export async function createRol(req, res) {
             permisos = [],  // Array de códigos: ['USUARIO_VER', 'ROL_VER']
             es_admin = false,
             es_empleado = false,
-            tolerancia_id
+            tolerancia_id,
+            color
         } = req.body;
 
         if (!nombre) {
@@ -136,10 +139,10 @@ export async function createRol(req, res) {
         const id = await generateId(ID_PREFIXES.ROL);
 
         const resultado = await pool.query(`
-            INSERT INTO roles (id, nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO roles (id, nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id, color)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
-        `, [id, nombre, descripcion, posicion, permisos_bitwise.toString(), es_admin, es_empleado, tolerancia_id]);
+        `, [id, nombre, descripcion, posicion, permisos_bitwise.toString(), es_admin, es_empleado, tolerancia_id, color]);
 
         res.status(201).json({
             success: true,
@@ -175,7 +178,8 @@ export async function updateRol(req, res) {
             permisos,  // Array de códigos o null para no cambiar
             es_admin,
             es_empleado,
-            tolerancia_id
+            tolerancia_id,
+            color
         } = req.body;
 
         // Obtener rol actual para auditoría
@@ -222,10 +226,11 @@ export async function updateRol(req, res) {
                 permisos_bitwise = $4,
                 es_admin = COALESCE($5, es_admin),
                 es_empleado = COALESCE($6, es_empleado),
-                tolerancia_id = COALESCE($7, tolerancia_id)
-            WHERE id = $8
+                tolerancia_id = COALESCE($7, tolerancia_id),
+                color = COALESCE($8, color)
+            WHERE id = $9
             RETURNING *
-        `, [nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id, id]);
+        `, [nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id, color, id]);
 
         await client.query('COMMIT');
 
