@@ -36,28 +36,20 @@ export async function registrarAsistencia(req, res) {
             });
         }
 
-        // Obtener registros del día con tipo calculado correctamente
+        // Obtener último registro del día
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
 
-        const registrosHoy = await pool.query(`
-            SELECT 
-                id,
-                estado,
-                fecha_registro,
-                ROW_NUMBER() OVER (ORDER BY fecha_registro ASC) as numero_registro
+        const ultimoRegistro = await pool.query(`
+            SELECT estado, fecha_registro
             FROM asistencias
-            WHERE empleado_id = $1 
-            AND DATE(fecha_registro) = DATE($2)
-            ORDER BY fecha_registro ASC
+            WHERE empleado_id = $1 AND DATE(fecha_registro) = DATE($2)
+            ORDER BY fecha_registro DESC
+            LIMIT 1
         `, [empleado_id, new Date()]);
 
-        // Determinar si es entrada o salida
-        // Si no hay registros O el último registro es salida (número par) → ENTRADA
-        // Si el último registro es entrada (número impar) → SALIDA
-        const ultimoRegistro = registrosHoy.rows[registrosHoy.rows.length - 1];
-        const esEntrada = registrosHoy.rows.length === 0 ||
-            (ultimoRegistro && ultimoRegistro.numero_registro % 2 === 0);
+        const esEntrada = ultimoRegistro.rows.length === 0 ||
+            ['salida_temprano', 'salida_puntual'].includes(ultimoRegistro.rows[0]?.estado);
 
         // Obtener tolerancia del rol del empleado
         const toleranciaQuery = await pool.query(`
@@ -109,7 +101,6 @@ export async function registrarAsistencia(req, res) {
             JSON.stringify({ asistencia_id: id, estado, dispositivo_origen, tipo: esEntrada ? 'entrada' : 'salida' })
         ]);
 
-        // Respuesta con tipo correcto
         res.status(201).json({
             success: true,
             message: `Asistencia registrada como ${estado}`,
@@ -141,21 +132,26 @@ function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEnt
         const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
         const diaSemana = diasSemana[ahora.getDay()];
 
+        // Parsear configuración si es string
         let config = typeof configuracionHorario === 'string'
             ? JSON.parse(configuracionHorario)
             : configuracionHorario;
 
         let turnosHoy = [];
 
+        // Soportar estructura nueva (configuracion_semanal)
         if (config.configuracion_semanal && config.configuracion_semanal[diaSemana]) {
             turnosHoy = config.configuracion_semanal[diaSemana].map(t => ({
                 entrada: t.inicio,
                 salida: t.fin
             }));
-        } else if (config.dias && config.dias.includes(diaSemana)) {
+        }
+        // Soportar estructura antigua (dias + turnos)
+        else if (config.dias && config.dias.includes(diaSemana)) {
             turnosHoy = config.turnos || [];
         }
 
+        // Si no hay turnos para hoy, es día de descanso
         if (turnosHoy.length === 0) {
             return esEntrada ? 'falta' : 'salida_puntual';
         }
@@ -174,6 +170,9 @@ function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEnt
     }
 }
 
+/**
+ * Calcula estado de ENTRADA con tolerancias
+ */
 function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
     for (const turno of turnos) {
         const [horaEntrada, minEntrada] = turno.entrada.split(':').map(Number);
@@ -184,14 +183,17 @@ function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
         const finToleranciaRetardo = minEntradaTurno + tolerancia.minutos_retardo;
         const finToleranciaFalta = minEntradaTurno + tolerancia.minutos_falta;
 
+        // Dentro de ventana puntual (anticipado + tolerancia retardo)
         if (horaActual >= inicioVentana && horaActual <= finToleranciaRetardo) {
             return 'puntual';
         }
 
+        // Dentro de tolerancia de retardo
         if (horaActual > finToleranciaRetardo && horaActual <= finToleranciaFalta) {
             return 'retardo';
         }
 
+        // Después de tolerancia de falta pero antes de fin de turno
         const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
         const minSalidaTurno = horaSalida * 60 + minSalida;
 
@@ -200,9 +202,13 @@ function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
         }
     }
 
+    // Si no está en ninguna ventana
     return 'falta';
 }
 
+/**
+ * Calcula estado de SALIDA
+ */
 function calcularEstadoSalida(turnos, horaActual) {
     for (const turno of turnos) {
         const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
@@ -211,103 +217,18 @@ function calcularEstadoSalida(turnos, horaActual) {
         const toleranciaSalida = 10;
         const inicioVentanaSalida = minSalidaTurno - toleranciaSalida;
 
+        // Salida anticipada
         if (horaActual < inicioVentanaSalida) {
             return 'salida_temprano';
         }
 
+        // Salida puntual
         if (horaActual >= inicioVentanaSalida) {
             return 'salida_puntual';
         }
     }
 
     return 'salida_puntual';
-}
-
-/**
- * GET /api/asistencias/empleado/:empleadoId
- * Obtiene asistencias de un empleado específico
- */
-export async function getAsistenciasEmpleado(req, res) {
-    try {
-        const { empleadoId } = req.params;
-        const { fecha_inicio, fecha_fin } = req.query;
-
-        let query = `
-            WITH registros_numerados AS (
-                SELECT
-                    a.id,
-                    a.estado,
-                    a.dispositivo_origen,
-                    a.ubicacion,
-                    a.fecha_registro,
-                    a.empleado_id,
-                    DATE(a.fecha_registro) as fecha_dia,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY DATE(a.fecha_registro) 
-                        ORDER BY a.fecha_registro ASC
-                    ) as numero_en_dia
-                FROM asistencias a
-                WHERE a.empleado_id = $1
-        `;
-
-        const params = [empleadoId];
-        let paramIndex = 2;
-
-        if (fecha_inicio) {
-            query += ` AND a.fecha_registro >= $${paramIndex++}`;
-            params.push(fecha_inicio);
-        }
-
-        if (fecha_fin) {
-            query += ` AND a.fecha_registro <= $${paramIndex++}`;
-            params.push(fecha_fin);
-        }
-
-        query += `
-            )
-            SELECT 
-                id,
-                estado,
-                dispositivo_origen,
-                ubicacion,
-                fecha_registro,
-                CASE 
-                    WHEN numero_en_dia % 2 = 1 THEN 'entrada'
-                    ELSE 'salida'
-                END as tipo
-            FROM registros_numerados
-            ORDER BY fecha_registro DESC
-        `;
-
-        const resultado = await pool.query(query, params);
-
-        const stats = await pool.query(`
-            SELECT
-                COUNT(*) as total,
-                COUNT(*) FILTER (WHERE estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE estado = 'retardo') as retardos,
-                COUNT(*) FILTER (WHERE estado = 'falta') as faltas,
-                COUNT(*) FILTER (WHERE estado = 'salida_puntual') as salidas_puntuales,
-                COUNT(*) FILTER (WHERE estado = 'salida_temprano') as salidas_tempranas
-            FROM asistencias
-            WHERE empleado_id = $1
-            ${fecha_inicio ? `AND fecha_registro >= '${fecha_inicio}'` : ''}
-            ${fecha_fin ? `AND fecha_registro <= '${fecha_fin}'` : ''}
-        `, [empleadoId]);
-
-        res.json({
-            success: true,
-            data: resultado.rows,
-            estadisticas: stats.rows[0]
-        });
-
-    } catch (error) {
-        console.error('Error en getAsistenciasEmpleado:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al obtener asistencias del empleado'
-        });
-    }
 }
 
 /**
@@ -327,27 +248,30 @@ export async function getAsistencias(req, res) {
         } = req.query;
 
         let query = `
-            WITH registros_numerados AS (
-                SELECT
-                    a.id,
-                    a.estado,
-                    a.dispositivo_origen,
-                    a.ubicacion,
-                    a.fecha_registro,
-                    a.empleado_id,
-                    u.nombre as empleado_nombre,
-                    u.foto as empleado_foto,
-                    DATE(a.fecha_registro) as fecha_dia,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY a.empleado_id, DATE(a.fecha_registro) 
-                        ORDER BY a.fecha_registro ASC
-                    ) as numero_en_dia
-                FROM asistencias a
-                INNER JOIN empleados e ON e.id = a.empleado_id
-                INNER JOIN usuarios u ON u.id = e.usuario_id
-                WHERE 1=1
+            SELECT
+                a.id,
+                a.estado,
+                a.dispositivo_origen,
+                a.ubicacion,
+                a.fecha_registro,
+                a.empleado_id,
+                u.nombre as empleado_nombre,
+                u.foto as empleado_foto,
+                CASE 
+                    WHEN (
+                        SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = a.empleado_id 
+                        AND DATE(a2.fecha_registro) = DATE(a.fecha_registro)
+                        AND a2.fecha_registro < a.fecha_registro
+                    ) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+                END as tipo
+            FROM asistencias a
+            INNER JOIN empleados e ON e.id = a.empleado_id
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            WHERE 1=1
         `;
-
         const params = [];
         let paramIndex = 1;
 
@@ -379,26 +303,7 @@ export async function getAsistencias(req, res) {
             params.push(fecha_fin);
         }
 
-        query += `
-            )
-            SELECT 
-                id,
-                estado,
-                dispositivo_origen,
-                ubicacion,
-                fecha_registro,
-                empleado_id,
-                empleado_nombre,
-                empleado_foto,
-                CASE 
-                    WHEN numero_en_dia % 2 = 1 THEN 'entrada'
-                    ELSE 'salida'
-                END as tipo
-            FROM registros_numerados
-            ORDER BY fecha_registro DESC 
-            LIMIT $${paramIndex++} OFFSET $${paramIndex}
-        `;
-
+        query += ` ORDER BY a.fecha_registro DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`;
         params.push(parseInt(limit), parseInt(offset));
 
         const resultado = await pool.query(query, params);
@@ -418,6 +323,82 @@ export async function getAsistencias(req, res) {
 }
 
 /**
+ * GET /api/asistencias/empleado/:empleadoId
+ * Obtiene asistencias de un empleado específico
+ */
+export async function getAsistenciasEmpleado(req, res) {
+    try {
+        const { empleadoId } = req.params;
+        const { fecha_inicio, fecha_fin } = req.query;
+
+        let query = `
+            SELECT
+                a.id,
+                a.estado,
+                a.dispositivo_origen,
+                a.ubicacion,
+                a.fecha_registro,
+                CASE 
+                    WHEN (
+                        SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = a.empleado_id 
+                        AND DATE(a2.fecha_registro) = DATE(a.fecha_registro)
+                        AND a2.fecha_registro < a.fecha_registro
+                    ) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+                END as tipo
+            FROM asistencias a
+            WHERE a.empleado_id = $1
+        `;
+        const params = [empleadoId];
+        let paramIndex = 2;
+
+        if (fecha_inicio) {
+            query += ` AND a.fecha_registro >= $${paramIndex++}`;
+            params.push(fecha_inicio);
+        }
+
+        if (fecha_fin) {
+            query += ` AND a.fecha_registro <= $${paramIndex++}`;
+            params.push(fecha_fin);
+        }
+
+        query += ` ORDER BY a.fecha_registro DESC`;
+
+        const resultado = await pool.query(query, params);
+
+        // Estadísticas
+        const stats = await pool.query(`
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE estado = 'puntual') as puntuales,
+                COUNT(*) FILTER (WHERE estado = 'retardo') as retardos,
+                COUNT(*) FILTER (WHERE estado = 'falta') as faltas,
+                COUNT(*) FILTER (WHERE estado = 'salida_puntual') as salidas_puntuales,
+                COUNT(*) FILTER (WHERE estado = 'salida_temprano') as salidas_tempranas
+            FROM asistencias
+            WHERE empleado_id = $1
+            ${fecha_inicio ? `AND fecha_registro >= '${fecha_inicio}'` : ''}
+            ${fecha_fin ? `AND fecha_registro <= '${fecha_fin}'` : ''}
+        `, [empleadoId]);
+
+        res.json({
+            success: true,
+            data: resultado.rows,
+            estadisticas: stats.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error en getAsistenciasEmpleado:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener asistencias del empleado'
+        });
+    }
+}
+
+/**
  * GET /api/asistencias/hoy
  * Obtiene resumen de asistencias del día actual
  */
@@ -429,25 +410,29 @@ export async function getAsistenciasHoy(req, res) {
         hoy.setHours(0, 0, 0, 0);
 
         let query = `
-            WITH registros_numerados AS (
-                SELECT
-                    a.id,
-                    a.estado,
-                    a.dispositivo_origen,
-                    a.fecha_registro,
-                    e.id as empleado_id,
-                    u.nombre as empleado_nombre,
-                    u.foto as empleado_foto,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY a.empleado_id 
-                        ORDER BY a.fecha_registro ASC
-                    ) as numero_en_dia
-                FROM asistencias a
-                INNER JOIN empleados e ON e.id = a.empleado_id
-                INNER JOIN usuarios u ON u.id = e.usuario_id
-                WHERE DATE(a.fecha_registro) = DATE($1)
+            SELECT
+                a.id,
+                a.estado,
+                a.dispositivo_origen,
+                a.fecha_registro,
+                e.id as empleado_id,
+                u.nombre as empleado_nombre,
+                u.foto as empleado_foto,
+                CASE 
+                    WHEN (
+                        SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = a.empleado_id 
+                        AND DATE(a2.fecha_registro) = DATE(a.fecha_registro)
+                        AND a2.fecha_registro < a.fecha_registro
+                    ) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+                END as tipo
+            FROM asistencias a
+            INNER JOIN empleados e ON e.id = a.empleado_id
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            WHERE DATE(a.fecha_registro) = DATE($1)
         `;
-
         const params = [hoy];
 
         if (departamento_id) {
@@ -458,26 +443,11 @@ export async function getAsistenciasHoy(req, res) {
             params.push(departamento_id);
         }
 
-        query += `
-            )
-            SELECT 
-                id,
-                estado,
-                dispositivo_origen,
-                fecha_registro,
-                empleado_id,
-                empleado_nombre,
-                empleado_foto,
-                CASE 
-                    WHEN numero_en_dia % 2 = 1 THEN 'entrada'
-                    ELSE 'salida'
-                END as tipo
-            FROM registros_numerados
-            ORDER BY fecha_registro DESC
-        `;
+        query += ` ORDER BY a.fecha_registro DESC`;
 
         const resultado = await pool.query(query, params);
 
+        // Resumen
         const resumen = {
             total: resultado.rows.length,
             puntuales: resultado.rows.filter(a => a.estado === 'puntual').length,
