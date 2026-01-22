@@ -1,11 +1,28 @@
 import { Router } from 'express';
-import { getCredenciales, getCredencialesByEmpleado, guardarDactilar, guardarFacial, guardarPin, verificarPin, eliminarCredencial } from '../controllers/credenciales.controller.js';
+import {
+    getCredenciales,
+    getCredencialesByEmpleado,
+    guardarDactilar,
+    guardarFacial,
+    guardarPin,
+    verificarPin,
+    eliminarCredencial,
+    getCredencialesPublico,
+    getDactilarByEmpleado
+} from '../controllers/credenciales.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
+import { verificarServiceKey } from '../middleware/service.middleware.js';
 
 const router = Router();
+
+router.get('/publico/lista', getCredencialesPublico);
+router.get('/publico/dactilar/:empleadoId', getDactilarByEmpleado);
+
+// Middleware de autenticación para las demás rutas
 router.use(verificarAutenticacion);
 
+// Rutas protegidas
 router.get('/', requirePermiso('USUARIO_VER'), getCredenciales);
 router.get('/empleado/:empleadoId', requirePermiso('USUARIO_VER'), getCredencialesByEmpleado);
 router.post('/dactilar', requirePermiso('USUARIO_MODIFICAR'), guardarDactilar);

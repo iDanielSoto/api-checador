@@ -122,7 +122,7 @@ export async function verificarPin(req, res) {
 export async function eliminarCredencial(req, res) {
     try {
         const { empleadoId } = req.params;
-        const { tipo } = req.query; // 'dactilar', 'facial', 'pin', 'todo'
+        const { tipo } = req.query;
         if (tipo === 'todo') {
             await pool.query('DELETE FROM credenciales WHERE empleado_id = $1', [empleadoId]);
         } else if (['dactilar', 'facial', 'pin'].includes(tipo)) {
@@ -134,5 +134,49 @@ export async function eliminarCredencial(req, res) {
     } catch (error) {
         console.error('Error en eliminarCredencial:', error);
         res.status(500).json({ success: false, message: 'Error al eliminar credencial' });
+    }
+}
+
+// ========== ENDPOINTS PÚBLICOS (sin autenticación) ==========
+// Obtener lista de credenciales con huella dactilar
+export async function getCredencialesPublico(req, res) {
+    try {
+        const resultado = await pool.query(`
+            SELECT c.id, c.empleado_id,
+                CASE WHEN c.dactilar IS NOT NULL THEN true ELSE false END as tiene_dactilar,
+                CASE WHEN c.facial IS NOT NULL THEN true ELSE false END as tiene_facial,
+                CASE WHEN c.pin IS NOT NULL THEN true ELSE false END as tiene_pin
+            FROM credenciales c
+            WHERE c.dactilar IS NOT NULL
+        `);
+        res.json({ success: true, data: resultado.rows });
+    } catch (error) {
+        console.error('Error en getCredencialesPublico:', error);
+        res.status(500).json({ success: false, message: 'Error al obtener credenciales' });
+    }
+}
+
+// Obtener huella dactilar de un empleado específico
+export async function getDactilarByEmpleado(req, res) {
+    try {
+        const { empleadoId } = req.params;
+        const resultado = await pool.query(
+            'SELECT dactilar FROM credenciales WHERE empleado_id = $1',
+            [empleadoId]
+        );
+
+        if (resultado.rows.length === 0 || !resultado.rows[0].dactilar) {
+            return res.status(404).json({ success: false, message: 'Huella no encontrada' });
+        }
+
+        const dactilarBase64 = resultado.rows[0].dactilar.toString('base64');
+
+        res.json({
+            success: true,
+            data: { dactilar: dactilarBase64 }
+        });
+    } catch (error) {
+        console.error('Error en getDactilarByEmpleado:', error);
+        res.status(500).json({ success: false, message: 'Error al obtener huella' });
     }
 }

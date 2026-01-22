@@ -142,14 +142,15 @@ export async function getSolicitudById(req, res) {
 export async function createSolicitud(req, res) {
     try {
         const {
-            tipo,           // 'movil' o 'escritorio'
+            tipo,
             nombre,
             descripcion,
             correo,
             ip,
             mac,
             sistema_operativo,
-            empresa_id
+            empresa_id,
+            observaciones
         } = req.body;
 
         if (!tipo || !nombre) {
@@ -159,7 +160,6 @@ export async function createSolicitud(req, res) {
             });
         }
 
-        // Verificar si ya existe una solicitud pendiente con la misma MAC
         if (mac) {
             const existente = await pool.query(
                 "SELECT id FROM solicitudes WHERE mac = $1 AND estado = 'pendiente'",
@@ -179,11 +179,11 @@ export async function createSolicitud(req, res) {
         const resultado = await pool.query(`
             INSERT INTO solicitudes (
                 id, tipo, nombre, descripcion, correo, ip, mac,
-                sistema_operativo, estado, token, empresa_id
+                sistema_operativo, estado, token, empresa_id, observaciones
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11)
             RETURNING *
-        `, [id, tipo, nombre, descripcion, correo, ip, mac, sistema_operativo, token, empresa_id]);
+        `, [id, tipo, nombre, descripcion, correo, ip, mac, sistema_operativo, token, empresa_id, observaciones]);
 
         res.status(201).json({
             success: true,
@@ -213,9 +213,8 @@ export async function aceptarSolicitud(req, res) {
 
     try {
         const { id } = req.params;
-        const { empleado_id } = req.body;  // Solo para móviles
+        const { empleado_id } = req.body;
 
-        // Obtener solicitud
         const solicitud = await client.query(
             "SELECT * FROM solicitudes WHERE id = $1 AND estado = 'pendiente'",
             [id]
@@ -232,7 +231,6 @@ export async function aceptarSolicitud(req, res) {
 
         await client.query('BEGIN');
 
-        // Crear dispositivo según el tipo
         let dispositivo_id;
 
         if (sol.tipo === 'escritorio') {
@@ -258,7 +256,6 @@ export async function aceptarSolicitud(req, res) {
             `, [dispositivo_id, sol.sistema_operativo, empleado_id]);
         }
 
-        // Actualizar solicitud
         await client.query(`
             UPDATE solicitudes SET
                 estado = 'aceptado',
@@ -368,6 +365,64 @@ export async function verificarSolicitud(req, res) {
         res.status(500).json({
             success: false,
             message: 'Error al verificar solicitud'
+        });
+    }
+}
+
+/**
+ * PATCH /api/solicitudes/:id/pendiente
+ * Actualiza el estado de una solicitud a 'pendiente'
+ * Útil para reabrir solicitudes rechazadas o procesadas
+ */
+export async function actualizarAPendiente(req, res) {
+    try {
+        const { id } = req.params;
+        const { observaciones } = req.body;
+
+        // Verificar que la solicitud existe
+        const solicitudExistente = await pool.query(
+            "SELECT * FROM solicitudes WHERE id = $1",
+            [id]
+        );
+
+        if (solicitudExistente.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Solicitud no encontrada'
+            });
+        }
+
+        const estadoActual = solicitudExistente.rows[0].estado;
+
+        // Verificar que no esté ya pendiente
+        if (estadoActual === 'pendiente') {
+            return res.status(400).json({
+                success: false,
+                message: 'La solicitud ya está en estado pendiente'
+            });
+        }
+
+        // Actualizar a pendiente
+        const resultado = await pool.query(`
+            UPDATE solicitudes SET
+                estado = 'pendiente',
+                fecha_respuesta = NULL,
+                observaciones = $1
+            WHERE id = $2
+            RETURNING *
+        `, [observaciones || null, id]);
+
+        res.json({
+            success: true,
+            message: 'Solicitud actualizada a pendiente',
+            data: resultado.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error en actualizarAPendiente:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al actualizar solicitud a pendiente'
         });
     }
 }

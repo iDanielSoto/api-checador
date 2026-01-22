@@ -240,8 +240,24 @@ export async function createUsuario(req, res) {
             }
         }
 
+        // ===== LÓGICA AUTOMÁTICA DEL ROL EMPLEADO =====
+        let rolesFinales = [...roles];
+
+        // Si es empleado, agregar automáticamente el rol "Empleado"
+        if (es_empleado) {
+            const rolEmpleado = await client.query(
+                'SELECT id FROM roles WHERE es_empleado = true LIMIT 1'
+            );
+            if (rolEmpleado.rows.length > 0) {
+                rolesFinales.push(rolEmpleado.rows[0].id);
+            }
+        }
+
+        // Eliminar duplicados usando Set
+        rolesFinales = [...new Set(rolesFinales)];
+
         // Asignar roles
-        for (const rol_id of roles) {
+        for (const rol_id of rolesFinales) {
             const urlId = await generateId(ID_PREFIXES.USUARIO_ROL);
             await client.query(`
                 INSERT INTO usuarios_roles (id, usuario_id, rol_id, es_activo)
@@ -293,6 +309,7 @@ export async function updateUsuario(req, res) {
             telefono,
             estado_cuenta,
             es_empleado,
+            roles,
             // Datos de empleado
             rfc,
             nss,
@@ -424,6 +441,93 @@ export async function updateUsuario(req, res) {
                         }
                     }
                 }
+            }
+        }
+
+        // ===== LÓGICA AUTOMÁTICA DEL ROL EMPLEADO =====
+        // Obtener el ID del rol Empleado
+        const rolEmpleadoResult = await client.query(
+            'SELECT id FROM roles WHERE es_empleado = true LIMIT 1'
+        );
+        const rolEmpleadoId = rolEmpleadoResult.rows[0]?.id;
+
+        if (roles !== undefined) {
+            // Si se envían roles explícitamente
+            let rolesFinales = [...roles];
+
+            // Si es empleado, agregar automáticamente el rol "Empleado"
+            if (es_empleado && rolEmpleadoId) {
+                rolesFinales.push(rolEmpleadoId);
+            }
+
+            // Si NO es empleado, quitar el rol "Empleado"
+            if (es_empleado === false && rolEmpleadoId) {
+                rolesFinales = rolesFinales.filter(r => r !== rolEmpleadoId);
+            }
+
+            // Eliminar duplicados
+            rolesFinales = [...new Set(rolesFinales)];
+
+            // Desactivar todos los roles actuales
+            await client.query(
+                'UPDATE usuarios_roles SET es_activo = false WHERE usuario_id = $1',
+                [id]
+            );
+
+            // Asignar los nuevos roles
+            for (const rol_id of rolesFinales) {
+                // Verificar si ya existe la relación
+                const existeRol = await client.query(
+                    'SELECT id FROM usuarios_roles WHERE usuario_id = $1 AND rol_id = $2',
+                    [id, rol_id]
+                );
+
+                if (existeRol.rows.length > 0) {
+                    // Reactivar
+                    await client.query(
+                        'UPDATE usuarios_roles SET es_activo = true WHERE usuario_id = $1 AND rol_id = $2',
+                        [id, rol_id]
+                    );
+                } else {
+                    // Crear nueva relación
+                    const urlId = await generateId(ID_PREFIXES.USUARIO_ROL);
+                    await client.query(`
+                        INSERT INTO usuarios_roles (id, usuario_id, rol_id, es_activo)
+                        VALUES ($1, $2, $3, true)
+                    `, [urlId, id, rol_id]);
+                }
+            }
+        } else if (es_empleado !== undefined && rolEmpleadoId) {
+            // Si NO se enviaron roles pero SÍ cambió es_empleado
+            // Solo gestionar el rol Empleado sin tocar los demás roles
+
+            if (es_empleado) {
+                // Agregar o activar el rol Empleado
+                const tieneRolEmpleado = await client.query(
+                    'SELECT id FROM usuarios_roles WHERE usuario_id = $1 AND rol_id = $2',
+                    [id, rolEmpleadoId]
+                );
+
+                if (tieneRolEmpleado.rows.length > 0) {
+                    // Ya existe, solo activarlo
+                    await client.query(
+                        'UPDATE usuarios_roles SET es_activo = true WHERE usuario_id = $1 AND rol_id = $2',
+                        [id, rolEmpleadoId]
+                    );
+                } else {
+                    // Crear nueva relación
+                    const urlId = await generateId(ID_PREFIXES.USUARIO_ROL);
+                    await client.query(`
+                        INSERT INTO usuarios_roles (id, usuario_id, rol_id, es_activo)
+                        VALUES ($1, $2, $3, true)
+                    `, [urlId, id, rolEmpleadoId]);
+                }
+            } else {
+                // Desactivar el rol Empleado
+                await client.query(
+                    'UPDATE usuarios_roles SET es_activo = false WHERE usuario_id = $1 AND rol_id = $2',
+                    [id, rolEmpleadoId]
+                );
             }
         }
 
