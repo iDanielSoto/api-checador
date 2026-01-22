@@ -240,7 +240,7 @@ export async function createUsuario(req, res) {
             }
         }
 
-        // ===== LÓGICA AUTOMÁTICA DEL ROL EMPLEADO =====
+        // Si es empleado, añade el rol
         let rolesFinales = [...roles];
 
         // Si es empleado, agregar automáticamente el rol "Empleado"

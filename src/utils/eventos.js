@@ -1,0 +1,144 @@
+// src/utils/eventos.js
+import pool from '../config/db.js';
+import { generateId, ID_PREFIXES } from './idGenerator.js';
+
+/**
+ * Tipos de eventos del sistema
+ */
+export const TIPOS_EVENTO = {
+    // Sistema
+    SISTEMA: 'sistema',
+
+    // Usuarios y Acceso
+    USUARIO: 'usuario',
+    ROL: 'rol',
+    AUTENTICACION: 'autenticacion',
+
+    // Asistencias
+    ASISTENCIA: 'asistencia',
+    INCIDENCIA: 'incidencia',
+
+    // Recursos Humanos
+    EMPLEADO: 'empleado',
+    DEPARTAMENTO: 'departamento',
+    HORARIO: 'horario',
+
+    // Dispositivos
+    DISPOSITIVO: 'dispositivo',
+    SOLICITUD: 'solicitud',
+    CREDENCIAL: 'credencial'
+};
+
+/**
+ * Prioridades de eventos
+ */
+export const PRIORIDADES = {
+    CRITICA: 'critica',
+    ALTA: 'alta',
+    MEDIA: 'media',
+    BAJA: 'baja'
+};
+
+/**
+ * Registra un evento en el sistema
+ * @param {Object} params - Parámetros del evento
+ * @param {string} params.titulo - Título del evento
+ * @param {string} params.descripcion - Descripción del evento
+ * @param {string} params.tipo_evento - Tipo de evento (usar TIPOS_EVENTO)
+ * @param {string} [params.prioridad='media'] - Prioridad (usar PRIORIDADES)
+ * @param {string} [params.empleado_id=null] - ID del empleado relacionado
+ * @param {string} [params.usuario_modificador_id=null] - ID del usuario que ejecutó la acción
+ * @param {Object} [params.detalles={}] - Detalles adicionales del evento
+ * @returns {Promise<string>} ID del evento creado
+ */
+export async function registrarEvento({
+    titulo,
+    descripcion,
+    tipo_evento,
+    prioridad = PRIORIDADES.MEDIA,
+    empleado_id = null,
+    usuario_modificador_id = null,
+    detalles = {}
+}) {
+    try {
+        const eventoId = await generateId(ID_PREFIXES.EVENTO);
+
+        // Agregar usuario_modificador_id a detalles si está disponible y es legible
+        const detallesCompletos = {
+            ...detalles
+        };
+
+        if (usuario_modificador_id) {
+            detallesCompletos.usuario_modificador_id = usuario_modificador_id;
+        }
+
+        await pool.query(`
+      INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [
+            eventoId,
+            titulo,
+            descripcion,
+            tipo_evento,
+            prioridad,
+            empleado_id,
+            JSON.stringify(detallesCompletos)
+        ]);
+
+        return eventoId;
+    } catch (error) {
+        console.error('Error al registrar evento:', error);
+        // No lanzamos error para no interrumpir el flujo principal
+        return null;
+    }
+}
+
+/**
+ * Registra múltiples eventos en una sola transacción
+ * @param {Array} eventos - Array de objetos con parámetros de eventos
+ * @returns {Promise<Array<string>>} Array de IDs de eventos creados
+ */
+export async function registrarEventosMultiples(eventos) {
+    const client = await pool.connect();
+    const eventosCreados = [];
+
+    try {
+        await client.query('BEGIN');
+
+        for (const evento of eventos) {
+            const eventoId = await generateId(ID_PREFIXES.EVENTO);
+
+            const detallesCompletos = {
+                ...evento.detalles
+            };
+
+            if (evento.usuario_modificador_id) {
+                detallesCompletos.usuario_modificador_id = evento.usuario_modificador_id;
+            }
+
+            await client.query(`
+        INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
+                eventoId,
+                evento.titulo,
+                evento.descripcion,
+                evento.tipo_evento,
+                evento.prioridad || PRIORIDADES.MEDIA,
+                evento.empleado_id || null,
+                JSON.stringify(detallesCompletos)
+            ]);
+
+            eventosCreados.push(eventoId);
+        }
+
+        await client.query('COMMIT');
+        return eventosCreados;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error al registrar eventos múltiples:', error);
+        return [];
+    } finally {
+        client.release();
+    }
+}

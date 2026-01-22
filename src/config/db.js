@@ -17,3 +17,5 @@ export const pool = new Pool({
 pool.connect()
     .then(() => console.log('✅ Conectado a la base de datos PostgreSQL'))
     .catch(err => console.error('❌ Error conectando a la base de datos:', err));
+
+export default pool;
