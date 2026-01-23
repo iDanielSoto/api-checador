@@ -106,6 +106,7 @@ export async function registrarAsistencia(req, res) {
             data: {
                 ...resultado.rows[0],
                 empleado_nombre: empleado.rows[0].nombre,
+                empleado_usuario: empleado.rows[0].usuario,
                 tipo: esEntrada ? 'entrada' : 'salida'
             }
         });
@@ -231,6 +232,7 @@ export async function getAsistencias(req, res) {
                 a.fecha_registro,
                 a.empleado_id,
                 u.nombre as empleado_nombre,
+                u.usuario as empleado_usuario,
                 u.foto as empleado_foto,
                 CASE
                     WHEN (
@@ -383,6 +385,7 @@ export async function getAsistenciasHoy(req, res) {
                 a.fecha_registro,
                 e.id as empleado_id,
                 u.nombre as empleado_nombre,
+                u.usuario as empleado_usuario,
                 u.foto as empleado_foto,
                 CASE
                     WHEN (

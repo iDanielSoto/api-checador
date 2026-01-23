@@ -251,9 +251,9 @@ export async function aceptarSolicitud(req, res) {
 
             dispositivo_id = await generateId(ID_PREFIXES.MOVIL);
             await client.query(`
-                INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id)
-                VALUES ($1, $2, false, true, $3)
-            `, [dispositivo_id, sol.sistema_operativo, empleado_id]);
+                INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id, ip, mac)
+                VALUES ($1, $2, false, true, $3, $4, $5)
+            `, [dispositivo_id, sol.sistema_operativo, empleado_id, sol.ip, sol.mac]);
         }
 
         await client.query(`

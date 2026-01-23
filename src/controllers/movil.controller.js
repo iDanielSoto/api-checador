@@ -17,6 +17,8 @@ export async function getMoviles(req, res) {
                 m.es_activo,
                 m.fecha_registro,
                 m.empleado_id,
+                m.ip,
+                m.mac,
                 u.nombre as empleado_nombre,
                 u.correo as empleado_correo
             FROM movil m
@@ -104,7 +106,9 @@ export async function createMovil(req, res) {
         const {
             empleado_id,
             sistema_operativo,
-            es_root = false
+            es_root = false,
+            ip,
+            mac
         } = req.body;
 
         if (!empleado_id) {
@@ -142,11 +146,12 @@ export async function createMovil(req, res) {
 
         const id = await generateId(ID_PREFIXES.MOVIL);
 
+        // Updated query to include ip and mac
         const resultado = await pool.query(`
-            INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id)
-            VALUES ($1, $2, $3, true, $4)
+            INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id, ip, mac)
+            VALUES ($1, $2, $3, true, $4, $5, $6)
             RETURNING *
-        `, [id, sistema_operativo, es_root, empleado_id]);
+        `, [id, sistema_operativo, es_root, empleado_id, ip || null, mac || null]);
 
         res.status(201).json({
             success: true,
@@ -170,16 +175,18 @@ export async function createMovil(req, res) {
 export async function updateMovil(req, res) {
     try {
         const { id } = req.params;
-        const { sistema_operativo, es_root, es_activo } = req.body;
+        const { sistema_operativo, es_root, es_activo, ip, mac } = req.body;
 
         const resultado = await pool.query(`
             UPDATE movil SET
                 sistema_operativo = COALESCE($1, sistema_operativo),
                 es_root = COALESCE($2, es_root),
-                es_activo = COALESCE($3, es_activo)
-            WHERE id = $4
+                es_activo = COALESCE($3, es_activo),
+                ip = COALESCE($4, ip),
+                mac = COALESCE($5, mac)
+            WHERE id = $6
             RETURNING *
-        `, [sistema_operativo, es_root, es_activo, id]);
+        `, [sistema_operativo, es_root, es_activo, ip, mac, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
