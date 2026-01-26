@@ -14,6 +14,8 @@ export async function getEmpresas(req, res) {
                 e.id,
                 e.nombre,
                 e.logo,
+                e.telefono,
+                e.correo,
                 e.es_activo,
                 e.fecha_registro,
                 e.configuracion_id,
@@ -23,6 +25,7 @@ export async function getEmpresas(req, res) {
             LEFT JOIN configuraciones c ON c.id = e.configuracion_id
             WHERE 1=1
         `;
+
         const params = [];
 
         if (es_activo !== undefined) {
@@ -99,6 +102,8 @@ export async function createEmpresa(req, res) {
         const {
             nombre,
             logo,
+            telefono,
+            correo,
             // Configuración inicial
             idioma = 'es',
             formato_fecha = 'DD/MM/YYYY',
@@ -125,10 +130,12 @@ export async function createEmpresa(req, res) {
         // Crear empresa
         const empresaId = await generateId(ID_PREFIXES.EMPRESA);
         const resultado = await client.query(`
-            INSERT INTO empresas (id, nombre, logo, es_activo, configuracion_id)
-            VALUES ($1, $2, $3, true, $4)
+            INSERT INTO empresas (
+                id, nombre, logo, telefono, correo, es_activo, configuracion_id
+            )
+            VALUES ($1, $2, $3, $4, $5, true, $6)
             RETURNING *
-        `, [empresaId, nombre, logo, configId]);
+        `, [empresaId, nombre, logo, telefono, correo, configId]);
 
         await client.query('COMMIT');
 
@@ -151,22 +158,24 @@ export async function createEmpresa(req, res) {
 }
 
 /**
- * PUT /api/empresas/:id
+ * PUT /api/empresas/:id    
  * Actualiza una empresa
  */
 export async function updateEmpresa(req, res) {
     try {
         const { id } = req.params;
-        const { nombre, logo, es_activo } = req.body;
+        const { nombre, logo, es_activo, telefono, correo } = req.body;
 
         const resultado = await pool.query(`
             UPDATE empresas SET
-                nombre = COALESCE($1, nombre),
-                logo = COALESCE($2, logo),
-                es_activo = COALESCE($3, es_activo)
-            WHERE id = $4
+                nombre   = COALESCE($1, nombre),
+                logo     = COALESCE($2, logo),
+                es_activo= COALESCE($3, es_activo),
+                telefono = COALESCE($4, telefono),
+                correo   = COALESCE($5, correo)
+            WHERE id = $6
             RETURNING *
-        `, [nombre, logo, es_activo, id]);
+        `, [nombre, logo, es_activo, telefono, correo, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
