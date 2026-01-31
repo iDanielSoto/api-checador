@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { obtenerPermisosActivos, crearPermisos, PERMISOS } from '../utils/permissions.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/roles
@@ -144,6 +145,16 @@ export async function createRol(req, res) {
             RETURNING *
         `, [id, nombre, descripcion, posicion, permisos_bitwise.toString(), es_admin, es_empleado, tolerancia_id, color]);
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Rol creado',
+            descripcion: `Se creó el rol "${nombre}"`,
+            tipo_evento: TIPOS_EVENTO.ROL,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { rol_id: id, nombre, permisos }
+        });
+
         res.status(201).json({
             success: true,
             message: 'Rol creado correctamente',
@@ -234,6 +245,16 @@ export async function updateRol(req, res) {
 
         await client.query('COMMIT');
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Rol actualizado',
+            descripcion: `Se actualizó el rol "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.ROL,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { rol_id: id, cambios: req.body }
+        });
+
         res.json({
             success: true,
             message: 'Rol actualizado correctamente',
@@ -276,7 +297,7 @@ export async function deleteRol(req, res) {
             });
         }
 
-        const resultado = await pool.query('DELETE FROM roles WHERE id = $1 RETURNING id', [id]);
+        const resultado = await pool.query('DELETE FROM roles WHERE id = $1 RETURNING id, nombre', [id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -284,6 +305,16 @@ export async function deleteRol(req, res) {
                 message: 'Rol no encontrado'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Rol eliminado',
+            descripcion: `Se eliminó el rol "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.ROL,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { rol_id: id }
+        });
 
         res.json({
             success: true,

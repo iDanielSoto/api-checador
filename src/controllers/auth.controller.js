@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import { pool } from '../config/db.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * POST /api/auth/login
@@ -95,6 +96,16 @@ export async function login(req, res) {
         // Eliminar contraseña de la respuesta
         delete usuarioData.contraseña;
 
+        // Registrar evento de login exitoso
+        await registrarEvento({
+            titulo: 'Inicio de sesión',
+            descripcion: `${usuarioData.nombre} inició sesión`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.BAJA,
+            empleado_id: usuarioData.empleado_id,
+            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario }
+        });
+
         res.json({
             success: true,
             message: 'Inicio de sesión exitoso',
@@ -140,8 +151,18 @@ export async function login(req, res) {
  */
 export async function logout(req, res) {
     try {
-        // En un sistema con JWT/sesiones, aquí invalidarías el token
-        // Por ahora solo confirmamos el logout
+        // Registrar evento de logout
+        if (req.usuario) {
+            await registrarEvento({
+                titulo: 'Cierre de sesión',
+                descripcion: `${req.usuario.nombre} cerró sesión`,
+                tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+                prioridad: PRIORIDADES.BAJA,
+                empleado_id: req.usuario.empleado_id,
+                detalles: { usuario_id: req.usuario.id }
+            });
+        }
+
         res.json({
             success: true,
             message: 'Sesión cerrada correctamente'
@@ -252,6 +273,16 @@ export async function cambiarPassword(req, res) {
             [hashNueva, req.usuario.id]
         );
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Contraseña cambiada',
+            descripcion: `${req.usuario.nombre} cambió su contraseña`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.MEDIA,
+            empleado_id: req.usuario.empleado_id,
+            detalles: { usuario_id: req.usuario.id }
+        });
+
         res.json({
             success: true,
             message: 'Contraseña actualizada correctamente'
@@ -271,4 +302,112 @@ export async function cambiarPassword(req, res) {
  */
 export async function hashPassword(password) {
     return bcrypt.hash(password, 10);
+}
+
+// POST /api/auth/biometric
+export async function loginBiometrico(req, res) {
+    try {
+        const { empleado_id } = req.body;
+
+        if (!empleado_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'empleado_id es requerido'
+            });
+        }
+
+        // Buscar empleado y su usuario asociado
+        const resultado = await pool.query(`
+            SELECT
+                u.id,
+                u.usuario,
+                u.correo,
+                u.nombre,
+                u.foto,
+                u.telefono,
+                u.estado_cuenta,
+                u.es_empleado,
+                e.id as empleado_id,
+                e.rfc,
+                e.nss,
+                e.horario_id
+            FROM empleados e
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            WHERE e.id = $1
+        `, [empleado_id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Empleado no encontrado'
+            });
+        }
+
+        const usuarioData = resultado.rows[0];
+
+        if (usuarioData.estado_cuenta !== 'activo') {
+            return res.status(403).json({
+                success: false,
+                message: `Cuenta ${usuarioData.estado_cuenta}. Contacte al administrador.`
+            });
+        }
+
+        // Obtener roles
+        const rolesResult = await pool.query(`
+            SELECT r.id, r.nombre, r.es_admin, r.posicion, r.permisos_bitwise
+            FROM roles r
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            WHERE ur.usuario_id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion DESC
+        `, [usuarioData.id]);
+
+        let permisosCombinadosBigInt = BigInt(0);
+        let esAdmin = false;
+        for (const rol of rolesResult.rows) {
+            if (rol.permisos_bitwise) permisosCombinadosBigInt |= BigInt(rol.permisos_bitwise);
+            if (rol.es_admin) esAdmin = true;
+        }
+
+        // Registrar evento de login biométrico
+        await registrarEvento({
+            titulo: 'Inicio de sesión biométrico',
+            descripcion: `${usuarioData.nombre} inició sesión por huella digital`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.BAJA,
+            empleado_id: usuarioData.empleado_id,
+            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, metodo: 'biometrico' }
+        });
+
+        res.json({
+            success: true,
+            message: 'Autenticación biométrica exitosa',
+            data: {
+                usuario: {
+                    id: usuarioData.id,
+                    usuario: usuarioData.usuario,
+                    correo: usuarioData.correo,
+                    nombre: usuarioData.nombre,
+                    foto: usuarioData.foto,
+                    telefono: usuarioData.telefono,
+                    es_empleado: true,  // Siempre true porque viene de tabla empleados
+                    empleado_id: usuarioData.empleado_id,
+                    rfc: usuarioData.rfc,
+                    nss: usuarioData.nss,
+                    horario_id: usuarioData.horario_id
+                },
+                roles: rolesResult.rows.map(r => ({
+                    id: r.id,
+                    nombre: r.nombre,
+                    es_admin: r.es_admin,
+                    posicion: r.posicion
+                })),
+                permisos: permisosCombinadosBigInt.toString(),
+                esAdmin,
+                token: usuarioData.id
+            }
+        });
+    } catch (error) {
+        console.error('Error en loginBiometrico:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
 }

@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/escritorio
@@ -135,6 +136,16 @@ export async function createEscritorio(req, res) {
             RETURNING *
         `, [id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos ? JSON.stringify(dispositivos_biometricos) : null]);
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Dispositivo de escritorio creado',
+            descripcion: `Se registró el dispositivo de escritorio "${nombre}"`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { escritorio_id: id, nombre, mac, ip }
+        });
+
         res.status(201).json({
             success: true,
             message: 'Dispositivo de escritorio creado correctamente',
@@ -189,6 +200,16 @@ export async function updateEscritorio(req, res) {
             });
         }
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Dispositivo de escritorio actualizado',
+            descripcion: `Se actualizó el dispositivo de escritorio "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.BAJA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { escritorio_id: id, cambios: req.body }
+        });
+
         res.json({
             success: true,
             message: 'Dispositivo actualizado correctamente',
@@ -224,6 +245,16 @@ export async function deleteEscritorio(req, res) {
                 message: 'Dispositivo no encontrado o ya desactivado'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Dispositivo de escritorio desactivado',
+            descripcion: `Se desactivó el dispositivo de escritorio ${id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { escritorio_id: id }
+        });
 
         res.json({
             success: true,

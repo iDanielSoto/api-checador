@@ -367,7 +367,7 @@ export async function getIncidenciasPendientes(req, res) {
         res.json({
             success: true,
             data: resultado.rows,
-            total: resultado.rows.length
+            total: resultado.rows.length    
         });
 
     } catch (error) {

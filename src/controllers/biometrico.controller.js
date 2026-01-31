@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/biometrico
@@ -134,6 +135,16 @@ export async function createBiometrico(req, res) {
             RETURNING *
         `, [id, nombre, descripcion, tipo, puerto, ip, escritorio_id]);
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Lector biométrico registrado',
+            descripcion: `Se registró el lector biométrico "${nombre}" (${tipo})`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { biometrico_id: id, nombre, tipo, escritorio_id }
+        });
+
         res.status(201).json({
             success: true,
             message: 'Lector biométrico registrado correctamente',
@@ -187,6 +198,16 @@ export async function updateBiometrico(req, res) {
                 message: 'Lector biométrico no encontrado'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Lector biométrico actualizado',
+            descripcion: `Se actualizó el lector biométrico "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.BAJA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { biometrico_id: id, cambios: req.body }
+        });
 
         res.json({
             success: true,
@@ -267,6 +288,16 @@ export async function deleteBiometrico(req, res) {
                 message: 'Lector no encontrado o ya desactivado'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Lector biométrico desactivado',
+            descripcion: `Se desactivó el lector biométrico ${id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { biometrico_id: id }
+        });
 
         res.json({
             success: true,

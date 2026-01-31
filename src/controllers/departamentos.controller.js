@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 export async function getDepartamentos(req, res) {
     try {
@@ -62,6 +63,16 @@ export async function createDepartamento(req, res) {
             jefes || null,
             color
         ]);
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Departamento creado',
+            descripcion: `Se creó el departamento "${nombre}"`,
+            tipo_evento: TIPOS_EVENTO.DEPARTAMENTO,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { departamento_id: id, nombre }
+        });
+
         res.status(201).json({ success: true, message: 'Departamento creado', data: resultado.rows[0] });
     } catch (error) {
         console.error('Error en createDepartamento:', error);
@@ -91,6 +102,17 @@ export async function updateDepartamento(req, res) {
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Departamento actualizado',
+            descripcion: `Se actualizó el departamento "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.DEPARTAMENTO,
+            prioridad: PRIORIDADES.BAJA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { departamento_id: id, cambios: req.body }
+        });
+
         res.json({ success: true, message: 'Departamento actualizado', data: resultado.rows[0] });
     } catch (error) {
         console.error('Error en updateDepartamento:', error);
@@ -107,6 +129,17 @@ export async function deleteDepartamento(req, res) {
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Departamento desactivado',
+            descripcion: `Se desactivó el departamento con ID ${id}`,
+            tipo_evento: TIPOS_EVENTO.DEPARTAMENTO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { departamento_id: id }
+        });
+
         res.json({ success: true, message: 'Departamento desactivado' });
     } catch (error) {
         console.error('Error en deleteDepartamento:', error);

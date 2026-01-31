@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/horarios
@@ -149,6 +150,17 @@ export async function createHorario(req, res) {
 
         await client.query('COMMIT');
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Horario creado',
+            descripcion: `Se creó y asignó un nuevo horario al empleado ${empleado_id}`,
+            tipo_evento: TIPOS_EVENTO.HORARIO,
+            prioridad: PRIORIDADES.MEDIA,
+            empleado_id: empleado_id,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { horario_id: id, fecha_inicio, fecha_fin }
+        });
+
         res.status(201).json({
             success: true,
             message: 'Horario creado y asignado correctamente',
@@ -228,6 +240,17 @@ export async function updateHorario(req, res) {
 
         await client.query('COMMIT');
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Horario actualizado',
+            descripcion: `Se actualizó el horario ${id}`,
+            tipo_evento: TIPOS_EVENTO.HORARIO,
+            prioridad: PRIORIDADES.BAJA,
+            empleado_id: empleado_id,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { horario_id: id, cambios: req.body }
+        });
+
         res.json({
             success: true,
             message: 'Horario actualizado correctamente',
@@ -292,6 +315,16 @@ export async function deleteHorario(req, res) {
 
         await client.query('COMMIT');
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Horario desactivado',
+            descripcion: `Se desactivó el horario ${id}`,
+            tipo_evento: TIPOS_EVENTO.HORARIO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { horario_id: id }
+        });
+
         res.json({
             success: true,
             message: 'Horario desactivado correctamente'
@@ -347,6 +380,16 @@ export async function asignarHorario(req, res) {
         `, [id, empleados_ids]);
 
         await client.query('COMMIT');
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Horario asignado',
+            descripcion: `Se asignó el horario ${id} a ${actualizados.rowCount} empleado(s)`,
+            tipo_evento: TIPOS_EVENTO.HORARIO,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { horario_id: id, empleados_ids }
+        });
 
         res.json({
             success: true,

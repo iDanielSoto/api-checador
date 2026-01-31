@@ -5,7 +5,8 @@ import {
     getEstadisticasDepartamento,
     getDetalleAsistencias,
     getDetalleIncidencias,
-    getReporteDesempeno
+    getReporteDesempeno,
+    getComparativaDepartamentos
 } from '../controllers/reportes.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
@@ -17,6 +18,7 @@ router.use(verificarAutenticacion);
 // Estadísticas
 router.get('/estadisticas-globales', requirePermiso('REPORTE_EXPORTAR', 'REGISTRO_VER'), getEstadisticasGlobales);
 router.get('/estadisticas-empleado/:empleadoId', requirePermiso('REPORTE_EXPORTAR', 'REGISTRO_VER'), getEstadisticasEmpleado);
+router.get('/comparativa-departamentos', getComparativaDepartamentos);
 router.get('/estadisticas-departamento/:departamentoId', requirePermiso('REPORTE_EXPORTAR', 'REGISTRO_VER'), getEstadisticasDepartamento);
 
 // Detalles para exportación

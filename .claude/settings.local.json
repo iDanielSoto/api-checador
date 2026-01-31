@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/Proyectos/FASITLAC/frontend/apps/admin/src/pages/**)",
+      "Bash(node -e:*)"
+    ]
+  }
+}

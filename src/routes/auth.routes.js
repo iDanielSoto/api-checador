@@ -3,7 +3,8 @@ import {
     login,
     logout,
     verificarSesion,
-    cambiarPassword
+    cambiarPassword,
+    loginBiometrico
 } from '../controllers/auth.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 
@@ -11,6 +12,7 @@ const router = Router();
 
 // Rutas públicas (no requieren autenticación)
 router.post('/login', login);
+router.post('/biometric', loginBiometrico);
 router.post('/logout', logout);
 
 // Rutas protegidas (requieren autenticación)

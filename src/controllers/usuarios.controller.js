@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { pool } from '../config/db.js';
 import { generateId, generateSecurityKey, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/usuarios
@@ -20,12 +21,15 @@ export async function getUsuarios(req, res) {
                 u.telefono,
                 u.estado_cuenta,
                 u.es_empleado,
+                u.empresa_id,
                 u.fecha_registro,
                 e.id as empleado_id,
                 e.rfc,
-                e.nss
+                e.nss,
+                emp.nombre as empresa_nombre
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
+            LEFT JOIN empresas emp ON emp.id = u.empresa_id
             WHERE 1=1
         `;
         const params = [];
@@ -107,13 +111,16 @@ export async function getUsuarioById(req, res) {
                 u.telefono,
                 u.estado_cuenta,
                 u.es_empleado,
+                u.empresa_id,
                 u.fecha_registro,
                 e.id as empleado_id,
                 e.rfc,
                 e.nss,
-                e.horario_id
+                e.horario_id,
+                emp.nombre as empresa_nombre
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
+            LEFT JOIN empresas emp ON emp.id = u.empresa_id
             WHERE u.id = $1
         `, [id]);
 
@@ -179,6 +186,7 @@ export async function createUsuario(req, res) {
             foto,
             telefono,
             es_empleado = false,
+            empresa_id,
             roles = [],
             // Datos de empleado (si es_empleado = true)
             rfc,
@@ -217,9 +225,9 @@ export async function createUsuario(req, res) {
 
         // Insertar usuario
         await client.query(`
-            INSERT INTO usuarios (id, usuario, correo, contraseña, nombre, foto, telefono, estado_cuenta, es_empleado, clave_seguridad)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'activo', $8, $9)
-        `, [id, usuario, correo, hashPassword, nombre, foto, telefono, es_empleado, clave_seguridad]);
+            INSERT INTO usuarios (id, usuario, correo, contraseña, nombre, foto, telefono, estado_cuenta, es_empleado, clave_seguridad, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'activo', $8, $9, $10)
+        `, [id, usuario, correo, hashPassword, nombre, foto, telefono, es_empleado, clave_seguridad, empresa_id || null]);
 
         // Si es empleado, crear registro en empleados
         let empleado_id = null;
@@ -267,6 +275,17 @@ export async function createUsuario(req, res) {
 
         await client.query('COMMIT');
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Usuario creado',
+            descripcion: `Se creó el usuario ${usuario} (${nombre})`,
+            tipo_evento: TIPOS_EVENTO.USUARIO,
+            prioridad: PRIORIDADES.MEDIA,
+            empleado_id: empleado_id,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { usuario_id: id, usuario, correo, es_empleado }
+        });
+
         res.status(201).json({
             success: true,
             message: 'Usuario creado correctamente',
@@ -309,6 +328,7 @@ export async function updateUsuario(req, res) {
             telefono,
             estado_cuenta,
             es_empleado,
+            empresa_id,
             roles,
             // Datos de empleado
             rfc,
@@ -362,10 +382,11 @@ export async function updateUsuario(req, res) {
                 foto = ${fotoQuery},
                 telefono = COALESCE($5, telefono),
                 estado_cuenta = COALESCE($6, estado_cuenta),
-                es_empleado = COALESCE($7, es_empleado)
-            WHERE id = $8
-            RETURNING id, usuario, correo, nombre, foto, telefono, estado_cuenta, es_empleado
-        `, [usuario, correo, nombre, fotoValue, telefono, estado_cuenta, es_empleado, id]);
+                es_empleado = COALESCE($7, es_empleado),
+                empresa_id = COALESCE($8, empresa_id)
+            WHERE id = $9
+            RETURNING id, usuario, correo, nombre, foto, telefono, estado_cuenta, es_empleado, empresa_id
+        `, [usuario, correo, nombre, fotoValue, telefono, estado_cuenta, es_empleado, empresa_id, id]);
 
         // Manejar cambios en es_empleado
         if (es_empleado !== undefined) {
@@ -533,6 +554,16 @@ export async function updateUsuario(req, res) {
 
         await client.query('COMMIT');
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Usuario actualizado',
+            descripcion: `Se actualizó el usuario ${resultado.rows[0].usuario}`,
+            tipo_evento: TIPOS_EVENTO.USUARIO,
+            prioridad: PRIORIDADES.BAJA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { usuario_id: id, cambios: req.body }
+        });
+
         res.json({
             success: true,
             message: 'Usuario actualizado correctamente',
@@ -571,6 +602,16 @@ export async function deleteUsuario(req, res) {
                 message: 'Usuario no encontrado o ya dado de baja'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Usuario dado de baja',
+            descripcion: `Se dio de baja al usuario con ID ${id}`,
+            tipo_evento: TIPOS_EVENTO.USUARIO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { usuario_id: id }
+        });
 
         res.json({
             success: true,
@@ -660,6 +701,16 @@ export async function asignarRol(req, res) {
             `, [urlId, id, rol_id]);
         }
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Rol asignado a usuario',
+            descripcion: `Se asignó un rol al usuario ${id}`,
+            tipo_evento: TIPOS_EVENTO.ROL,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { usuario_id: id, rol_id }
+        });
+
         res.json({
             success: true,
             message: 'Rol asignado correctamente'
@@ -695,6 +746,16 @@ export async function removerRol(req, res) {
             });
         }
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Rol removido de usuario',
+            descripcion: `Se removió un rol del usuario ${id}`,
+            tipo_evento: TIPOS_EVENTO.ROL,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { usuario_id: id, rol_id: rolId }
+        });
+
         res.json({
             success: true,
             message: 'Rol removido correctamente'
@@ -727,12 +788,15 @@ export async function getUsuarioByUsername(req, res) {
                 u.telefono,
                 u.estado_cuenta,
                 u.es_empleado,
+                u.empresa_id,
                 u.fecha_registro,
                 e.rfc,
                 e.nss,
-                e.horario_id
+                e.horario_id,
+                emp.nombre as empresa_nombre
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
+            LEFT JOIN empresas emp ON emp.id = u.empresa_id
             WHERE u.usuario = $1
         `, [username]);
 

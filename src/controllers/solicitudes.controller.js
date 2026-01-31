@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, generateToken, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/solicitudes
@@ -150,7 +151,8 @@ export async function createSolicitud(req, res) {
             mac,
             sistema_operativo,
             empresa_id,
-            observaciones
+            observaciones,
+            dispositivos_temp
         } = req.body;
 
         if (!tipo || !nombre) {
@@ -179,11 +181,20 @@ export async function createSolicitud(req, res) {
         const resultado = await pool.query(`
             INSERT INTO solicitudes (
                 id, tipo, nombre, descripcion, correo, ip, mac,
-                sistema_operativo, estado, token, empresa_id, observaciones
+                sistema_operativo, estado, token, empresa_id, observaciones, dispositivos_temp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, $12)
             RETURNING *
-        `, [id, tipo, nombre, descripcion, correo, ip, mac, sistema_operativo, token, empresa_id, observaciones]);
+        `, [id, tipo, nombre, descripcion, correo, ip, mac, sistema_operativo, token, empresa_id, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: `Nueva solicitud de ${tipo}`,
+            descripcion: `Se recibió solicitud de registro: ${nombre}`,
+            tipo_evento: TIPOS_EVENTO.SOLICITUD,
+            prioridad: PRIORIDADES.MEDIA,
+            detalles: { solicitud_id: id, tipo, nombre, ip, mac }
+        });
 
         res.status(201).json({
             success: true,
@@ -232,13 +243,55 @@ export async function aceptarSolicitud(req, res) {
         await client.query('BEGIN');
 
         let dispositivo_id;
+        let biometricos_ids = [];
 
         if (sol.tipo === 'escritorio') {
             dispositivo_id = await generateId(ID_PREFIXES.ESCRITORIO);
+
+            // Procesar dispositivos_temp si existen
+            const dispositivos_temp = sol.dispositivos_temp || [];
+
+            // Generar IDs de biométricos
+            for (const dispositivo of dispositivos_temp) {
+                const biometrico_id = await generateId(ID_PREFIXES.BIOMETRICO);
+                biometricos_ids.push({
+                    id: biometrico_id,
+                    ...dispositivo
+                });
+            }
+
+            // 1. Crear el escritorio con los IDs de biométricos
             await client.query(`
-                INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, es_activo)
-                VALUES ($1, $2, $3, $4, $5, $6, true)
-            `, [dispositivo_id, sol.nombre, sol.descripcion, sol.ip, sol.mac, sol.sistema_operativo]);
+                INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+            `, [
+                dispositivo_id,
+                sol.nombre,
+                sol.descripcion,
+                sol.ip,
+                sol.mac,
+                sol.sistema_operativo,
+                biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null
+            ]);
+
+            // 2. Crear registros biométricos (ahora el escritorio ya existe)
+            for (const dispositivo of biometricos_ids) {
+                await client.query(`
+                    INSERT INTO biometrico (id, nombre, descripcion, tipo, ip, puerto, estado, es_activo, escritorio_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, 'desconectado', true, $7)
+                `, [
+                    dispositivo.id,
+                    dispositivo.nombre,
+                    dispositivo.descripcion || null,
+                    dispositivo.tipo,
+                    dispositivo.ip || null,
+                    dispositivo.puerto || null,
+                    dispositivo_id
+                ]);
+            }
+
+            // Extraer solo los IDs para la respuesta
+            biometricos_ids = biometricos_ids.map(b => b.id);
 
         } else if (sol.tipo === 'movil') {
             if (!empleado_id) {
@@ -265,14 +318,35 @@ export async function aceptarSolicitud(req, res) {
 
         await client.query('COMMIT');
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: `Solicitud de ${sol.tipo} aceptada`,
+            descripcion: `Dispositivo ${sol.nombre} registrado como ${dispositivo_id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.BAJA,
+            detalles: {
+                solicitud_id: id,
+                dispositivo_id,
+                tipo: sol.tipo,
+                biometricos_ids: biometricos_ids.length > 0 ? biometricos_ids : undefined
+            }
+        });
+
+        const responseData = {
+            solicitud_id: id,
+            dispositivo_id,
+            tipo: sol.tipo
+        };
+
+        // Incluir IDs de biométricos si se crearon
+        if (biometricos_ids.length > 0) {
+            responseData.biometricos_ids = biometricos_ids;
+        }
+
         res.json({
             success: true,
             message: 'Solicitud aceptada. Dispositivo creado.',
-            data: {
-                solicitud_id: id,
-                dispositivo_id,
-                tipo: sol.tipo
-            }
+            data: responseData
         });
 
     } catch (error) {
@@ -319,10 +393,21 @@ export async function rechazarSolicitud(req, res) {
             });
         }
 
+        const sol = resultado.rows[0];
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: `Solicitud de ${sol.tipo} rechazada`,
+            descripcion: `Solicitud ${sol.nombre} rechazada: ${observaciones}`,
+            tipo_evento: TIPOS_EVENTO.SOLICITUD,
+            prioridad: PRIORIDADES.MEDIA,
+            detalles: { solicitud_id: id, tipo: sol.tipo, motivo: observaciones }
+        });
+
         res.json({
             success: true,
             message: 'Solicitud rechazada',
-            data: resultado.rows[0]
+            data: sol
         });
 
     } catch (error) {
@@ -343,7 +428,7 @@ export async function verificarSolicitud(req, res) {
         const { token } = req.params;
 
         const resultado = await pool.query(`
-            SELECT id, tipo, estado, fecha_respuesta, observaciones
+            SELECT id, tipo, estado, fecha_respuesta, observaciones, mac
             FROM solicitudes
             WHERE token = $1
         `, [token]);
@@ -355,9 +440,29 @@ export async function verificarSolicitud(req, res) {
             });
         }
 
+        const solicitud = resultado.rows[0];
+        const responseData = {
+            id: solicitud.id,
+            tipo: solicitud.tipo,
+            estado: solicitud.estado,
+            fecha_respuesta: solicitud.fecha_respuesta,
+            observaciones: solicitud.observaciones
+        };
+
+        // Si está aceptada y es tipo escritorio, buscar el escritorio_id por MAC
+        if (solicitud.estado === 'aceptado' && solicitud.tipo === 'escritorio' && solicitud.mac) {
+            const escritorio = await pool.query(
+                'SELECT id FROM escritorio WHERE mac = $1',
+                [solicitud.mac]
+            );
+            if (escritorio.rows.length > 0) {
+                responseData.escritorio_id = escritorio.rows[0].id;
+            }
+        }
+
         res.json({
             success: true,
-            data: resultado.rows[0]
+            data: responseData
         });
 
     } catch (error) {

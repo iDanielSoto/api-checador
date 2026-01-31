@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/empleados
@@ -98,6 +99,7 @@ export async function getEmpleadoById(req, res) {
                 u.foto,
                 u.telefono,
                 u.estado_cuenta,
+                u.empresa_id,
                 h.id as horario_id,
                 h.configuracion as horario_config,
                 h.fecha_inicio as horario_inicio,
@@ -175,6 +177,17 @@ export async function updateEmpleado(req, res) {
                 message: 'Empleado no encontrado'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Empleado actualizado',
+            descripcion: `Se actualizó la información del empleado ${id}`,
+            tipo_evento: TIPOS_EVENTO.EMPLEADO,
+            prioridad: PRIORIDADES.BAJA,
+            empleado_id: id,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { cambios: req.body }
+        });
 
         res.json({
             success: true,
@@ -267,6 +280,17 @@ export async function asignarDepartamento(req, res) {
             `, [edId, id, departamento_id]);
         }
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Empleado asignado a departamento',
+            descripcion: `Se asignó el empleado ${id} a un departamento`,
+            tipo_evento: TIPOS_EVENTO.EMPLEADO,
+            prioridad: PRIORIDADES.BAJA,
+            empleado_id: id,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { departamento_id }
+        });
+
         res.json({
             success: true,
             message: 'Empleado asignado al departamento'
@@ -301,6 +325,17 @@ export async function removerDepartamento(req, res) {
                 message: 'El empleado no está asignado a ese departamento'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Empleado removido de departamento',
+            descripcion: `Se removió el empleado ${id} de un departamento`,
+            tipo_evento: TIPOS_EVENTO.EMPLEADO,
+            prioridad: PRIORIDADES.BAJA,
+            empleado_id: id,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { departamento_id: deptoId }
+        });
 
         res.json({
             success: true,

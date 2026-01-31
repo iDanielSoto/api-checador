@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
  * GET /api/movil
@@ -153,6 +154,17 @@ export async function createMovil(req, res) {
             RETURNING *
         `, [id, sistema_operativo, es_root, empleado_id, ip || null, mac || null]);
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Dispositivo móvil registrado',
+            descripcion: `Se registró un dispositivo móvil para el empleado ${empleado_id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.MEDIA,
+            empleado_id: empleado_id,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { movil_id: id, sistema_operativo, mac, ip }
+        });
+
         res.status(201).json({
             success: true,
             message: 'Dispositivo móvil registrado correctamente',
@@ -195,6 +207,16 @@ export async function updateMovil(req, res) {
             });
         }
 
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Dispositivo móvil actualizado',
+            descripcion: `Se actualizó el dispositivo móvil ${id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.BAJA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { movil_id: id, cambios: req.body }
+        });
+
         res.json({
             success: true,
             message: 'Dispositivo móvil actualizado correctamente',
@@ -230,6 +252,16 @@ export async function deleteMovil(req, res) {
                 message: 'Dispositivo no encontrado o ya desactivado'
             });
         }
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Dispositivo móvil desactivado',
+            descripcion: `Se desactivó el dispositivo móvil ${id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { movil_id: id }
+        });
 
         res.json({
             success: true,
