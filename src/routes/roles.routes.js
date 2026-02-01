@@ -5,6 +5,7 @@ import {
     createRol,
     updateRol,
     deleteRol,
+    reactivarRol,
     getPermisosCatalogo,
     getUsuariosConRol
 } from '../controllers/roles.controller.js';
@@ -25,6 +26,7 @@ router.get('/:id', requirePermiso('ROL_VER'), getRolById);
 router.post('/', requirePermiso('ROL_CREAR'), createRol);
 router.put('/:id', requirePermiso('ROL_MODIFICAR'), updateRol);
 router.delete('/:id', requirePermiso('ROL_SOFTDELETE'), deleteRol);
+router.patch('/:id/reactivar', requirePermiso('ROL_SOFTDELETE'), reactivarRol);
 
 // Usuarios de un rol
 router.get('/:id/usuarios', requirePermiso('ROL_VER'), getUsuariosConRol);

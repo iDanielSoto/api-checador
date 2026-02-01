@@ -44,6 +44,7 @@ export async function verificarAutenticacion(req, res, next) {
                 u.foto,
                 u.estado_cuenta,
                 u.es_empleado,
+                u.empresa_id,
                 e.id as empleado_id
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id

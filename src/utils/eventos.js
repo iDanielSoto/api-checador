@@ -25,8 +25,7 @@ export const TIPOS_EVENTO = {
 
     // Dispositivos
     DISPOSITIVO: 'dispositivo',
-    SOLICITUD: 'solicitud',
-    CREDENCIAL: 'credencial'
+    SOLICITUD: 'solicitud'
 };
 
 /**

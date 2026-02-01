@@ -7,7 +7,9 @@ import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
  */
 export async function getTolerancias(req, res) {
     try {
-        const resultado = await pool.query(`
+        const { es_activo } = req.query;
+
+        let query = `
             SELECT
                 t.id,
                 t.nombre,
@@ -19,10 +21,25 @@ export async function getTolerancias(req, res) {
                 t.aplica_tolerancia_salida,
                 t.dias_aplica,
                 t.fecha_registro,
-                (SELECT COUNT(*) FROM roles r WHERE r.tolerancia_id = t.id) as roles_count
+                t.rol_id,
+                t.es_activo,
+                r.nombre as rol_nombre,
+                (SELECT COUNT(*) FROM roles r2 WHERE r2.tolerancia_id = t.id) as roles_count
             FROM tolerancias t
-            ORDER BY t.nombre ASC
-        `);
+            LEFT JOIN roles r ON r.id = t.rol_id
+        `;
+
+        const params = [];
+        if (es_activo !== undefined) {
+            query += ` WHERE t.es_activo = $1`;
+            params.push(es_activo === 'true');
+        } else {
+            query += ` WHERE t.es_activo = true`;
+        }
+
+        query += ` ORDER BY t.nombre ASC`;
+
+        const resultado = await pool.query(query, params);
 
         res.json({
             success: true,
@@ -47,7 +64,10 @@ export async function getToleranciaById(req, res) {
         const { id } = req.params;
 
         const resultado = await pool.query(`
-            SELECT * FROM tolerancias WHERE id = $1
+            SELECT t.*, r.nombre as rol_nombre
+            FROM tolerancias t
+            LEFT JOIN roles r ON r.id = t.rol_id
+            WHERE t.id = $1
         `, [id]);
 
         if (resultado.rows.length === 0) {
@@ -85,7 +105,7 @@ export async function getToleranciaById(req, res) {
  */
 export async function createTolerancia(req, res) {
     try {
-        const {
+        let {
             nombre,
             minutos_retardo = 10,
             minutos_falta = 30,
@@ -93,13 +113,22 @@ export async function createTolerancia(req, res) {
             minutos_anticipado_max = 60,
             aplica_tolerancia_entrada = true,
             aplica_tolerancia_salida = false,
-            dias_aplica
+            dias_aplica,
+            rol_id
         } = req.body;
+
+        // Si no se envía nombre pero sí rol_id, tomar el nombre del rol
+        if (!nombre && rol_id) {
+            const rol = await pool.query('SELECT nombre FROM roles WHERE id = $1', [rol_id]);
+            if (rol.rows.length > 0) {
+                nombre = `Tolerancia - ${rol.rows[0].nombre}`;
+            }
+        }
 
         if (!nombre) {
             return res.status(400).json({
                 success: false,
-                message: 'El nombre es requerido'
+                message: 'El nombre es requerido (o proporciona un rol_id para generar uno automático)'
             });
         }
 
@@ -109,15 +138,16 @@ export async function createTolerancia(req, res) {
             INSERT INTO tolerancias (
                 id, nombre, minutos_retardo, minutos_falta,
                 permite_registro_anticipado, minutos_anticipado_max,
-                aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica
+                aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica, rol_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
         `, [
             id, nombre, minutos_retardo, minutos_falta,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            dias_aplica ? JSON.stringify(dias_aplica) : null
+            dias_aplica ? JSON.stringify(dias_aplica) : null,
+            rol_id || null
         ]);
 
         res.status(201).json({
@@ -150,7 +180,8 @@ export async function updateTolerancia(req, res) {
             minutos_anticipado_max,
             aplica_tolerancia_entrada,
             aplica_tolerancia_salida,
-            dias_aplica
+            dias_aplica,
+            rol_id
         } = req.body;
 
         const diasJson = dias_aplica ? JSON.stringify(dias_aplica) : null;
@@ -165,13 +196,15 @@ export async function updateTolerancia(req, res) {
                 aplica_tolerancia_entrada = COALESCE($6, aplica_tolerancia_entrada),
                 aplica_tolerancia_salida = COALESCE($7, aplica_tolerancia_salida),
                 dias_aplica = COALESCE($8, dias_aplica)
+                ${rol_id !== undefined ? ', rol_id = $10' : ''}
             WHERE id = $9
             RETURNING *
         `, [
             nombre, minutos_retardo, minutos_falta,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            diasJson, id
+            diasJson, id,
+            ...(rol_id !== undefined ? [rol_id || null] : [])
         ]);
 
         if (resultado.rows.length === 0) {
@@ -198,29 +231,15 @@ export async function updateTolerancia(req, res) {
 
 /**
  * DELETE /api/tolerancias/:id
- * Elimina una tolerancia
+ * Desactiva una tolerancia (soft delete)
  */
 export async function deleteTolerancia(req, res) {
     try {
         const { id } = req.params;
 
-        // Verificar si tiene roles asignados
-        const roles = await pool.query(
-            'SELECT COUNT(*) FROM roles WHERE tolerancia_id = $1',
-            [id]
-        );
-
-        if (parseInt(roles.rows[0].count) > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'No se puede eliminar una tolerancia con roles asignados'
-            });
-        }
-
-        const resultado = await pool.query(
-            'DELETE FROM tolerancias WHERE id = $1 RETURNING id',
-            [id]
-        );
+        const resultado = await pool.query(`
+            UPDATE tolerancias SET es_activo = false WHERE id = $1 RETURNING id, nombre
+        `, [id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -231,14 +250,14 @@ export async function deleteTolerancia(req, res) {
 
         res.json({
             success: true,
-            message: 'Tolerancia eliminada correctamente'
+            message: 'Tolerancia desactivada correctamente'
         });
 
     } catch (error) {
         console.error('Error en deleteTolerancia:', error);
         res.status(500).json({
             success: false,
-            message: 'Error al eliminar tolerancia'
+            message: 'Error al desactivar tolerancia'
         });
     }
 }

@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import app from './app.js';
+import { iniciarCronFaltas } from './jobs/faltasCron.js';
 
 dotenv.config();
 
@@ -14,4 +15,6 @@ app.listen(PORT, () => {
     console.log(`🛠️  http://localhost:${PORT}`);
     console.log(`🕓 ${new Date().toLocaleString()}`);
     console.log(`${line}\n`);
+
+    iniciarCronFaltas();
 });

@@ -278,6 +278,50 @@ export async function deleteMovil(req, res) {
 }
 
 /**
+ * PATCH /api/movil/:id/reactivar
+ * Reactiva un dispositivo móvil desactivado
+ */
+export async function reactivarMovil(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE movil SET es_activo = true
+            WHERE id = $1 AND es_activo = false
+            RETURNING id
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Dispositivo no encontrado o ya está activo'
+            });
+        }
+
+        await registrarEvento({
+            titulo: 'Dispositivo móvil reactivado',
+            descripcion: `Se reactivó el dispositivo móvil ${id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { movil_id: id }
+        });
+
+        res.json({
+            success: true,
+            message: 'Dispositivo móvil reactivado correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en reactivarMovil:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al reactivar dispositivo móvil'
+        });
+    }
+}
+
+/**
  * GET /api/movil/empleado/:empleadoId
  * Obtiene el dispositivo móvil de un empleado
  */

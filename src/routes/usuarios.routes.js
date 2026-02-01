@@ -6,6 +6,7 @@ import {
     createUsuario,
     updateUsuario,
     deleteUsuario,
+    reactivarUsuario,
     getRolesDeUsuario,
     asignarRol,
     removerRol
@@ -26,6 +27,7 @@ router.get('/:id', requirePermisoOrSelf('id', 'USUARIO_VER'), getUsuarioById);
 router.post('/', requirePermiso('USUARIO_CREAR'), createUsuario);
 router.put('/:id', requirePermisoOrSelf('id', 'USUARIO_MODIFICAR'), updateUsuario);
 router.delete('/:id', requirePermiso('USUARIO_SOFTDELETE'), deleteUsuario);
+router.patch('/:id/reactivar', requirePermiso('USUARIO_SOFTDELETE'), reactivarUsuario);
 
 // Gestión de roles de usuario
 router.get('/:id/roles', requirePermisoOrSelf('id', 'ROL_VER'), getRolesDeUsuario);

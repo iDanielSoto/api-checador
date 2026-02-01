@@ -58,7 +58,7 @@ END as tipo
         const toleranciaQuery = await pool.query(`
             SELECT t.minutos_retardo, t.minutos_falta, t.permite_registro_anticipado, t.minutos_anticipado_max, t.aplica_tolerancia_salida
             FROM tolerancias t
-            INNER JOIN roles r ON r.tolerancia_id = t.id
+            INNER JOIN roles r ON r.tolerancia_id = t.id OR t.rol_id = r.id
             INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
             INNER JOIN empleados e ON e.usuario_id = ur.usuario_id
             WHERE e.id = $1 AND ur.es_activo = true
@@ -82,7 +82,6 @@ END as tipo
 
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         const ubicacionArray = ubicacion ? `{${ubicacion.join(',')} } ` : null;
-
         const resultado = await pool.query(`
             INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id)
 VALUES($1, $2, $3, $4, $5, $6)
@@ -119,7 +118,7 @@ RETURNING *
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(`
             INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
-VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)
+VALUES($1, $2, $3, 'asistencia', 'media', $4, $5)
         `, [
             eventoId,
             `Registro de ${esEntrada ? 'entrada' : 'salida'} - ${estado} `,

@@ -186,7 +186,7 @@ export async function createUsuario(req, res) {
             foto,
             telefono,
             es_empleado = false,
-            empresa_id,
+            empresa_id = req.usuario?.empresa_id,
             roles = [],
             // Datos de empleado (si es_empleado = true)
             rfc,
@@ -623,6 +623,50 @@ export async function deleteUsuario(req, res) {
         res.status(500).json({
             success: false,
             message: 'Error al eliminar usuario'
+        });
+    }
+}
+
+/**
+ * PATCH /api/usuarios/:id/reactivar
+ * Reactiva un usuario dado de baja
+ */
+export async function reactivarUsuario(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE usuarios SET estado_cuenta = 'activo'
+            WHERE id = $1 AND estado_cuenta = 'baja'
+            RETURNING id, nombre
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado o no está dado de baja'
+            });
+        }
+
+        await registrarEvento({
+            titulo: 'Usuario reactivado',
+            descripcion: `Se reactivó al usuario "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.USUARIO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { usuario_id: id }
+        });
+
+        res.json({
+            success: true,
+            message: 'Usuario reactivado correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en reactivarUsuario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al reactivar usuario'
         });
     }
 }

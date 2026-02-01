@@ -269,3 +269,47 @@ export async function deleteEscritorio(req, res) {
         });
     }
 }
+
+/**
+ * PATCH /api/escritorio/:id/reactivar
+ * Reactiva un dispositivo de escritorio desactivado
+ */
+export async function reactivarEscritorio(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE escritorio SET es_activo = true
+            WHERE id = $1 AND es_activo = false
+            RETURNING id
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Dispositivo no encontrado o ya está activo'
+            });
+        }
+
+        await registrarEvento({
+            titulo: 'Dispositivo de escritorio reactivado',
+            descripcion: `Se reactivó el dispositivo de escritorio ${id}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { escritorio_id: id }
+        });
+
+        res.json({
+            success: true,
+            message: 'Dispositivo reactivado correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en reactivarEscritorio:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al reactivar dispositivo'
+        });
+    }
+}

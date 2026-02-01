@@ -146,3 +146,29 @@ export async function deleteDepartamento(req, res) {
         res.status(500).json({ success: false, message: 'Error al desactivar departamento' });
     }
 }
+
+export async function reactivarDepartamento(req, res) {
+    try {
+        const { id } = req.params;
+        const resultado = await pool.query(`
+            UPDATE departamentos SET es_activo = true WHERE id = $1 AND es_activo = false RETURNING id, nombre
+        `, [id]);
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Departamento no encontrado o ya está activo' });
+        }
+
+        await registrarEvento({
+            titulo: 'Departamento reactivado',
+            descripcion: `Se reactivó el departamento "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.DEPARTAMENTO,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { departamento_id: id }
+        });
+
+        res.json({ success: true, message: 'Departamento reactivado correctamente' });
+    } catch (error) {
+        console.error('Error en reactivarDepartamento:', error);
+        res.status(500).json({ success: false, message: 'Error al reactivar departamento' });
+    }
+}

@@ -9,7 +9,9 @@ import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js'
  */
 export async function getRoles(req, res) {
     try {
-        const resultado = await pool.query(`
+        const { es_activo } = req.query;
+
+        let query = `
             SELECT
                 r.id,
                 r.nombre,
@@ -18,6 +20,7 @@ export async function getRoles(req, res) {
                 r.permisos_bitwise,
                 r.es_admin,
                 r.es_empleado,
+                r.es_activo,
                 r.fecha_registro,
                 r.tolerancia_id,
                 r.color,
@@ -25,8 +28,19 @@ export async function getRoles(req, res) {
                 (SELECT COUNT(*) FROM usuarios_roles ur WHERE ur.rol_id = r.id AND ur.es_activo = true) as usuarios_count
             FROM roles r
             LEFT JOIN tolerancias t ON t.id = r.tolerancia_id
-            ORDER BY r.posicion DESC
-        `);
+        `;
+
+        const params = [];
+        if (es_activo !== undefined && es_activo !== 'all') {
+            query += ` WHERE r.es_activo = $1`;
+            params.push(es_activo === 'true');
+        } else if (es_activo !== 'all') {
+            query += ` WHERE r.es_activo = true`;
+        }
+
+        query += ` ORDER BY r.posicion DESC`;
+
+        const resultado = await pool.query(query, params);
 
         // Agregar lista de permisos activos a cada rol
         const roles = resultado.rows.map(rol => ({
@@ -278,26 +292,15 @@ export async function updateRol(req, res) {
 
 /**
  * DELETE /api/roles/:id
- * Elimina un rol (solo si no tiene usuarios asignados)
+ * Desactiva un rol (soft delete)
  */
 export async function deleteRol(req, res) {
     try {
         const { id } = req.params;
 
-        // Verificar si tiene usuarios asignados
-        const usuariosAsignados = await pool.query(
-            'SELECT COUNT(*) FROM usuarios_roles WHERE rol_id = $1 AND es_activo = true',
-            [id]
-        );
-
-        if (parseInt(usuariosAsignados.rows[0].count) > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'No se puede eliminar un rol con usuarios asignados'
-            });
-        }
-
-        const resultado = await pool.query('DELETE FROM roles WHERE id = $1 RETURNING id, nombre', [id]);
+        const resultado = await pool.query(`
+            UPDATE roles SET es_activo = false WHERE id = $1 RETURNING id, nombre
+        `, [id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -306,10 +309,16 @@ export async function deleteRol(req, res) {
             });
         }
 
+        // Desactivar asignaciones de usuarios a este rol
+        await pool.query(
+            'UPDATE usuarios_roles SET es_activo = false WHERE rol_id = $1',
+            [id]
+        );
+
         // Registrar evento
         await registrarEvento({
-            titulo: 'Rol eliminado',
-            descripcion: `Se eliminó el rol "${resultado.rows[0].nombre}"`,
+            titulo: 'Rol desactivado',
+            descripcion: `Se desactivó el rol "${resultado.rows[0].nombre}"`,
             tipo_evento: TIPOS_EVENTO.ROL,
             prioridad: PRIORIDADES.ALTA,
             usuario_modificador_id: req.usuario?.id,
@@ -318,14 +327,58 @@ export async function deleteRol(req, res) {
 
         res.json({
             success: true,
-            message: 'Rol eliminado correctamente'
+            message: 'Rol desactivado correctamente'
         });
 
     } catch (error) {
         console.error('Error en deleteRol:', error);
         res.status(500).json({
             success: false,
-            message: 'Error al eliminar rol'
+            message: 'Error al desactivar rol'
+        });
+    }
+}
+
+/**
+ * PATCH /api/roles/:id/reactivar
+ * Reactiva un rol desactivado
+ */
+export async function reactivarRol(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE roles SET es_activo = true
+            WHERE id = $1 AND es_activo = false
+            RETURNING id, nombre
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Rol no encontrado o ya está activo'
+            });
+        }
+
+        await registrarEvento({
+            titulo: 'Rol reactivado',
+            descripcion: `Se reactivó el rol "${resultado.rows[0].nombre}"`,
+            tipo_evento: TIPOS_EVENTO.ROL,
+            prioridad: PRIORIDADES.ALTA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { rol_id: id }
+        });
+
+        res.json({
+            success: true,
+            message: 'Rol reactivado correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en reactivarRol:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al reactivar rol'
         });
     }
 }

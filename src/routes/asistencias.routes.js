@@ -12,7 +12,7 @@ const router = Router();
 
 router.use(verificarAutenticacion);
 
-// Rutas específicas primero
+// Rutas específzicas primero
 router.get('/hoy', requirePermiso('REGISTRO_VER'), getAsistenciasHoy);
 router.get('/empleado/:empleadoId', requirePermisoOrSelf('empleadoId', 'REGISTRO_VER'), getAsistenciasEmpleado);
 
