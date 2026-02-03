@@ -1,159 +1,104 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 
-export async function registrarAsistencia(req, res) {
-    try {
-        const {
-            empleado_id,
-            dispositivo_origen,
-            ubicacion,
-            departamento_id
-        } = req.body;
+const MINUTOS_SEPARACION_TURNOS = 15;
 
-        if (!empleado_id || !dispositivo_origen) {
-            return res.status(400).json({
-                success: false,
-                message: 'empleado_id y dispositivo_origen   son requeridos'
-            });
-        }
-
-        const empleado = await pool.query(`
-            SELECT e.id, e.horario_id, u.nombre, h.configuracion
-            FROM empleados e
-            INNER JOIN usuarios u ON u.id = e.usuario_id
-            LEFT JOIN horarios h ON h.id = e.horario_id
-            WHERE e.id = $1 AND u.estado_cuenta = 'activo'
-    `, [empleado_id]);
-
-        if (empleado.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Empleado no encontrado o inactivo'
-            });
-        }
-
-        const ultimoRegistro = await pool.query(`
-SELECT
-estado,
-    fecha_registro,
-    CASE
-WHEN(
-    SELECT COUNT(*) 
-                        FROM asistencias a2 
-                        WHERE a2.empleado_id = $1
-                        AND DATE(a2.fecha_registro) = DATE(fecha_registro)
-                        AND a2.fecha_registro < asistencias.fecha_registro
-) % 2 = 0 THEN 'entrada'
-                    ELSE 'salida'
-END as tipo
-            FROM asistencias
-            WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE
-            ORDER BY fecha_registro DESC
-            LIMIT 1
-    `, [empleado_id]);
-
-        const esEntrada = ultimoRegistro.rows.length === 0 ||
-            ultimoRegistro.rows[0].tipo === 'salida';
-
-        const toleranciaQuery = await pool.query(`
-            SELECT t.minutos_retardo, t.minutos_falta, t.permite_registro_anticipado, t.minutos_anticipado_max, t.aplica_tolerancia_salida
-            FROM tolerancias t
-            INNER JOIN roles r ON r.tolerancia_id = t.id OR t.rol_id = r.id
-            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
-            INNER JOIN empleados e ON e.usuario_id = ur.usuario_id
-            WHERE e.id = $1 AND ur.es_activo = true
-            ORDER BY r.posicion DESC
-            LIMIT 1
-        `, [empleado_id]);
-
-        const tolerancia = toleranciaQuery.rows[0] || {
-            minutos_retardo: 10,
-            minutos_falta: 30,
-            permite_registro_anticipado: true,
-            minutos_anticipado_max: 60
-        };
-
-        const estado = calcularEstadoAsistencia(
-            empleado.rows[0].configuracion,
-            new Date(),
-            tolerancia,
-            esEntrada
-        );
-
-        const id = await generateId(ID_PREFIXES.ASISTENCIA);
-        const ubicacionArray = ubicacion ? `{${ubicacion.join(',')} } ` : null;
-        const resultado = await pool.query(`
-            INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id)
-VALUES($1, $2, $3, $4, $5, $6)
-RETURNING *
-    `, [id, estado, dispositivo_origen, ubicacionArray, empleado_id, departamento_id]);
-
-        // Si es salida, buscar la entrada correspondiente y confirmar estado del bloque
-        if (!esEntrada) {
-            const entradaCorrespondiente = await pool.query(`
-                SELECT id, estado FROM asistencias
-                WHERE empleado_id = $1
-                  AND DATE(fecha_registro) = CURRENT_DATE
-                  AND id != $2
-                  AND (
-                    SELECT COUNT(*)
-                    FROM asistencias a2
-                    WHERE a2.empleado_id = $1
-                      AND DATE(a2.fecha_registro) = DATE(asistencias.fecha_registro)
-                      AND a2.fecha_registro < asistencias.fecha_registro
-                  ) % 2 = 0
-                ORDER BY fecha_registro DESC
-                LIMIT 1
-            `, [empleado_id, id]);
-
-            if (entradaCorrespondiente.rows.length > 0) {
-                const entrada = entradaCorrespondiente.rows[0];
-                // El estado del bloque es el estado de la entrada (puntual/retardo/falta)
-                // La salida no modifica el estado, solo confirma que el bloque fue completado
-                // (sin salida, eventualmente sería falta)
-                console.log(`Bloque completado: entrada ${entrada.id} (${entrada.estado}) + salida ${id} (${estado})`);
-            }
-        }
-
-        const eventoId = await generateId(ID_PREFIXES.EVENTO);
-        await pool.query(`
-            INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
-VALUES($1, $2, $3, 'asistencia', 'media', $4, $5)
-        `, [
-            eventoId,
-            `Registro de ${esEntrada ? 'entrada' : 'salida'} - ${estado} `,
-            `${empleado.rows[0].nombre} registró ${esEntrada ? 'entrada' : 'salida'} `,
-            empleado_id,
-            JSON.stringify({
-                asistencia_id: id,
-                estado,
-                dispositivo_origen,
-                tipo: esEntrada ? 'entrada' : 'salida',
-                departamento_id
-            })
-        ]);
-
-        res.status(201).json({
-            success: true,
-            message: `Asistencia registrada como ${estado} `,
-            data: {
-                ...resultado.rows[0],
-                empleado_nombre: empleado.rows[0].nombre,
-                tipo: esEntrada ? 'entrada' : 'salida'
-            }
-        });
-
-    } catch (error) {
-        console.error('Error en registrarAsistencia:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al registrar asistencia',
-            error: error.message
-        });
+function agruparTurnosConcatenados(turnos) {
+    if (!turnos || turnos.length === 0) {
+        return [];
     }
+
+    if (turnos.length === 1) {
+        return [turnos];
+    }
+
+    const grupos = [];
+    let grupoActual = [turnos[0]];
+
+    for (let i = 1; i < turnos.length; i++) {
+        const turnoAnterior = grupoActual[grupoActual.length - 1];
+        const turnoActual = turnos[i];
+
+        const [hSalida, mSalida] = turnoAnterior.salida.split(':').map(Number);
+        const minutosSalida = hSalida * 60 + mSalida;
+
+        const [hEntrada, mEntrada] = turnoActual.entrada.split(':').map(Number);
+        const minutosEntrada = hEntrada * 60 + mEntrada;
+
+        const diferencia = minutosEntrada - minutosSalida;
+
+        if (diferencia <= MINUTOS_SEPARACION_TURNOS) {
+            grupoActual.push(turnoActual);
+        } else {
+            grupos.push(grupoActual);
+            grupoActual = [turnoActual];
+        }
+    }
+
+    grupos.push(grupoActual);
+    return grupos;
 }
 
-function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEntrada) {
+function getEntradaSalidaGrupo(grupo) {
+    if (!grupo || grupo.length === 0) {
+        return { entrada: '00:00', salida: '00:00' };
+    }
+
+    return {
+        entrada: grupo[0].entrada,
+        salida: grupo[grupo.length - 1].salida
+    };
+}
+
+function calcularEstadoEntrada(turno, horaActual, tolerancia) {
+    const [horaEntrada, minEntrada] = turno.entrada.split(':').map(Number);
+    const minEntradaTurno = horaEntrada * 60 + minEntrada;
+
+    const minutosAnticipado = tolerancia.minutos_anticipado_max || 60;
+    const inicioVentana = minEntradaTurno - minutosAnticipado;
+    const finToleranciaRetardo = minEntradaTurno + tolerancia.minutos_retardo;
+    const finToleranciaFalta = minEntradaTurno + tolerancia.minutos_falta;
+
+    if (horaActual >= inicioVentana && horaActual <= finToleranciaRetardo) {
+        return 'puntual';
+    }
+
+    if (horaActual > finToleranciaRetardo && horaActual <= finToleranciaFalta) {
+        return 'retardo';
+    }
+
+    const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
+    const minSalidaTurno = horaSalida * 60 + minSalida;
+
+    if (horaActual > finToleranciaFalta && horaActual <= minSalidaTurno) {
+        return 'falta';
+    }
+
+    return 'falta';
+}
+
+function calcularEstadoSalida(turno, horaActual, tolerancia) {
+    const minutosTolerancia = tolerancia.aplica_tolerancia_salida
+        ? (tolerancia.minutos_retardo || 10)
+        : 10;
+
+    const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
+    const minSalidaTurno = horaSalida * 60 + minSalida;
+
+    const inicioVentanaSalida = minSalidaTurno - minutosTolerancia;
+
+    if (horaActual >= inicioVentanaSalida && horaActual <= minSalidaTurno + 5) {
+        return 'salida_puntual';
+    }
+
+    if (horaActual < inicioVentanaSalida) {
+        return 'salida_temprano';
+    }
+
+    return 'salida_puntual';
+}
+
+function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEntrada, totalRegistrosHoy = 0) {
     try {
         if (!configuracionHorario) {
             return esEntrada ? 'puntual' : 'salida_puntual';
@@ -181,95 +126,172 @@ function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEnt
             return esEntrada ? 'falta' : 'salida_puntual';
         }
 
-        turnosHoy = fusionarBloquesContinuos(turnosHoy);
-
+        const gruposTurnos = agruparTurnosConcatenados(turnosHoy);
         const horaActual = ahora.getHours() * 60 + ahora.getMinutes();
 
         if (esEntrada) {
-            return calcularEstadoEntrada(turnosHoy, horaActual, tolerancia);
+            const numeroGrupo = Math.floor(totalRegistrosHoy / 2);
+
+            if (numeroGrupo >= gruposTurnos.length) {
+                return 'falta';
+            }
+
+            const grupoActual = gruposTurnos[numeroGrupo];
+            const { entrada, salida } = getEntradaSalidaGrupo(grupoActual);
+
+            return calcularEstadoEntrada(
+                { entrada, salida },
+                horaActual,
+                tolerancia
+            );
+
         } else {
-            return calcularEstadoSalida(turnosHoy, horaActual, tolerancia);
+            const numeroGrupo = Math.floor(totalRegistrosHoy / 2);
+
+            if (numeroGrupo >= gruposTurnos.length) {
+                return 'salida_puntual';
+            }
+
+            const grupoActual = gruposTurnos[numeroGrupo];
+            const { entrada, salida } = getEntradaSalidaGrupo(grupoActual);
+
+            return calcularEstadoSalida(
+                { entrada, salida },
+                horaActual,
+                tolerancia
+            );
         }
 
     } catch (error) {
-        console.error('Error calculando estado:', error);
         return esEntrada ? 'puntual' : 'salida_puntual';
     }
 }
 
-function calcularEstadoEntrada(turnos, horaActual, tolerancia) {
-    for (const turno of turnos) {
-        const [horaEntrada, minEntrada] = turno.entrada.split(':').map(Number);
-        const minEntradaTurno = horaEntrada * 60 + minEntrada;
+export async function registrarAsistencia(req, res) {
+    try {
+        const {
+            empleado_id,
+            dispositivo_origen,
+            ubicacion,
+            departamento_id
+        } = req.body;
 
-        const minutosAnticipado = tolerancia.minutos_anticipado_max || 60;
-        const inicioVentana = minEntradaTurno - minutosAnticipado;
-        const finToleranciaRetardo = minEntradaTurno + tolerancia.minutos_retardo;
-        const finToleranciaFalta = minEntradaTurno + tolerancia.minutos_falta;
-
-        if (horaActual >= inicioVentana && horaActual <= finToleranciaRetardo) {
-            return 'puntual';
+        if (!empleado_id || !dispositivo_origen) {
+            return res.status(400).json({
+                success: false,
+                message: 'empleado_id y dispositivo_origen son requeridos'
+            });
         }
 
-        if (horaActual > finToleranciaRetardo && horaActual <= finToleranciaFalta) {
-            return 'retardo';
+        const empleado = await pool.query(`
+            SELECT e.id, e.horario_id, u.nombre, h.configuracion
+            FROM empleados e
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            LEFT JOIN horarios h ON h.id = e.horario_id
+            WHERE e.id = $1 AND u.estado_cuenta = 'activo'
+    `, [empleado_id]);
+
+        if (empleado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Empleado no encontrado o inactivo'
+            });
         }
 
-        const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
-        const minSalidaTurno = horaSalida * 60 + minSalida;
+        const registrosHoy = await pool.query(`
+SELECT
+a.id,
+    a.estado,
+    a.fecha_registro,
+    CASE
+WHEN(
+    SELECT COUNT(*) 
+                        FROM asistencias a2 
+                        WHERE a2.empleado_id = $1
+                        AND DATE(a2.fecha_registro) = DATE(a.fecha_registro)
+                        AND a2.fecha_registro < a.fecha_registro
+) % 2 = 0 THEN 'entrada'
+                    ELSE 'salida'
+END as tipo
+            FROM asistencias a
+            WHERE a.empleado_id = $1 AND DATE(a.fecha_registro) = CURRENT_DATE
+            ORDER BY a.fecha_registro ASC
+    `, [empleado_id]);
 
-        if (horaActual > finToleranciaFalta && horaActual <= minSalidaTurno) {
-            return 'falta';
-        }
+        const totalRegistrosHoy = registrosHoy.rows.length;
+        const esEntrada = totalRegistrosHoy % 2 === 0;
+
+        const toleranciaQuery = await pool.query(`
+            SELECT t.minutos_retardo, t.minutos_falta, t.permite_registro_anticipado,
+    t.minutos_anticipado_max, t.aplica_tolerancia_salida
+            FROM tolerancias t
+            INNER JOIN roles r ON r.tolerancia_id = t.id
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            INNER JOIN empleados e ON e.usuario_id = ur.usuario_id
+            WHERE e.id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion DESC
+            LIMIT 1
+        `, [empleado_id]);
+
+        const tolerancia = toleranciaQuery.rows[0] || {
+            minutos_retardo: 10,
+            minutos_falta: 30,
+            permite_registro_anticipado: true,
+            minutos_anticipado_max: 60
+        };
+
+        const estado = calcularEstadoAsistencia(
+            empleado.rows[0].configuracion,
+            new Date(),
+            tolerancia,
+            esEntrada,
+            totalRegistrosHoy
+        );
+
+        const id = await generateId(ID_PREFIXES.ASISTENCIA);
+        const ubicacionArray = ubicacion ? `{${ubicacion.join(',')} } ` : null;
+
+        const resultado = await pool.query(`
+            INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id)
+VALUES($1, $2, $3, $4, $5, $6)
+RETURNING *
+    `, [id, estado, dispositivo_origen, ubicacionArray, empleado_id, departamento_id]);
+
+        const eventoId = await generateId(ID_PREFIXES.EVENTO);
+        await pool.query(`
+            INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
+VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)
+        `, [
+            eventoId,
+            `Registro de ${esEntrada ? 'entrada' : 'salida'} - ${estado} `,
+            `${empleado.rows[0].nombre} registró ${esEntrada ? 'entrada' : 'salida'} `,
+            empleado_id,
+            JSON.stringify({
+                asistencia_id: id,
+                estado,
+                dispositivo_origen,
+                tipo: esEntrada ? 'entrada' : 'salida',
+                departamento_id
+            })
+        ]);
+
+        res.status(201).json({
+            success: true,
+            message: `Asistencia registrada como ${estado} `,
+            data: {
+                ...resultado.rows[0],
+                empleado_nombre: empleado.rows[0].nombre,
+                tipo: esEntrada ? 'entrada' : 'salida'
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error al registrar asistencia',
+            error: error.message
+        });
     }
-
-    return 'falta';
-}
-
-function calcularEstadoSalida(turnos, horaActual, tolerancia) {
-    const minutosTolerancia = tolerancia.aplica_tolerancia_salida
-        ? (tolerancia.minutos_retardo || 10)
-        : 10;
-
-    for (const turno of turnos) {
-        const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
-        const minSalidaTurno = horaSalida * 60 + minSalida;
-
-        const inicioVentanaSalida = minSalidaTurno - minutosTolerancia;
-
-        if (horaActual < inicioVentanaSalida) {
-            return 'salida_temprano';
-        }
-
-        if (horaActual >= inicioVentanaSalida) {
-            return 'salida_puntual';
-        }
-    }
-
-    return 'salida_puntual';
-}
-
-function fusionarBloquesContinuos(turnos) {
-    if (turnos.length <= 1) return turnos;
-
-    const ordenados = [...turnos].sort((a, b) => {
-        const [ha, ma] = a.entrada.split(':').map(Number);
-        const [hb, mb] = b.entrada.split(':').map(Number);
-        return (ha * 60 + ma) - (hb * 60 + mb);
-    });
-
-    const fusionados = [{ ...ordenados[0] }];
-
-    for (let i = 1; i < ordenados.length; i++) {
-        const ultimo = fusionados[fusionados.length - 1];
-        if (ultimo.salida === ordenados[i].entrada) {
-            ultimo.salida = ordenados[i].salida;
-        } else {
-            fusionados.push({ ...ordenados[i] });
-        }
-    }
-
-    return fusionados;
 }
 
 export async function getAsistencias(req, res) {
@@ -355,7 +377,6 @@ END as tipo
         });
 
     } catch (error) {
-        console.error('Error en getAsistencias:', error);
         res.status(500).json({
             success: false,
             message: 'Error al obtener asistencias'
@@ -429,7 +450,6 @@ COUNT(*) as total,
         });
 
     } catch (error) {
-        console.error('Error en getAsistenciasEmpleado:', error);
         res.status(500).json({
             success: false,
             message: 'Error al obtener asistencias del empleado'
@@ -502,7 +522,6 @@ END as tipo
         });
 
     } catch (error) {
-        console.error('Error en getAsistenciasHoy:', error);
         res.status(500).json({
             success: false,
             message: 'Error al obtener asistencias de hoy'

@@ -343,6 +343,50 @@ export async function deleteHorario(req, res) {
 }
 
 /**
+ * PATCH /api/horarios/:id/reactivar
+ * Reactiva un horario desactivado (soft delete inverso)
+ */
+export async function reactivarHorario(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE horarios SET es_activo = true
+            WHERE id = $1 AND es_activo = false
+            RETURNING id
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Horario no encontrado o ya está activo'
+            });
+        }
+
+        await registrarEvento({
+            titulo: 'Horario reactivado',
+            descripcion: `Se reactivó el horario ${id}`,
+            tipo_evento: TIPOS_EVENTO.HORARIO,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { horario_id: id }
+        });
+
+        res.json({
+            success: true,
+            message: 'Horario reactivado correctamente'
+        });
+
+    } catch (error) {
+        console.error('Error en reactivarHorario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al reactivar horario'
+        });
+    }
+}
+
+/**
  * POST /api/horarios/:id/asignar
  * Asigna un horario a uno o varios empleados
  */

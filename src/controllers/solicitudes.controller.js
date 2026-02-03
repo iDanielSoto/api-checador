@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { generateId, generateToken, ID_PREFIXES } from '../utils/idGenerator.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
+import { addClient, broadcast } from '../utils/sse.js';
 
 /**
  * GET /api/solicitudes
@@ -196,6 +197,14 @@ export async function createSolicitud(req, res) {
             detalles: { solicitud_id: id, tipo, nombre, ip, mac }
         });
 
+        // Notificar a clientes SSE
+        broadcast('nueva-solicitud', {
+            id: resultado.rows[0].id,
+            tipo,
+            nombre,
+            estado: 'pendiente'
+        });
+
         res.status(201).json({
             success: true,
             message: 'Solicitud creada correctamente. Espere aprobación.',
@@ -343,6 +352,9 @@ export async function aceptarSolicitud(req, res) {
             responseData.biometricos_ids = biometricos_ids;
         }
 
+        // Notificar a clientes SSE
+        broadcast('solicitud-actualizada', { id, estado: 'aceptado', tipo: sol.tipo });
+
         res.json({
             success: true,
             message: 'Solicitud aceptada. Dispositivo creado.',
@@ -403,6 +415,9 @@ export async function rechazarSolicitud(req, res) {
             prioridad: PRIORIDADES.MEDIA,
             detalles: { solicitud_id: id, tipo: sol.tipo, motivo: observaciones }
         });
+
+        // Notificar a clientes SSE
+        broadcast('solicitud-actualizada', { id, estado: 'rechazado', tipo: sol.tipo });
 
         res.json({
             success: true,
@@ -530,4 +545,33 @@ export async function actualizarAPendiente(req, res) {
             message: 'Error al actualizar solicitud a pendiente'
         });
     }
+}
+
+/**
+ * GET /api/solicitudes/stream
+ * SSE endpoint para notificaciones en tiempo real de solicitudes
+ * Usa token por query param porque EventSource no soporta headers
+ */
+export async function streamSolicitudes(req, res) {
+    const { token } = req.query;
+
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Token requerido' });
+    }
+
+    // Verificar que el token (usuario_id) sea válido
+    try {
+        const resultado = await pool.query(
+            "SELECT id FROM usuarios WHERE id = $1 AND estado_cuenta = 'activo'",
+            [token]
+        );
+
+        if (resultado.rows.length === 0) {
+            return res.status(401).json({ success: false, message: 'Token inválido' });
+        }
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Error de autenticación' });
+    }
+
+    addClient(res);
 }

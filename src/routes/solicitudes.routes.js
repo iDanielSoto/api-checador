@@ -7,12 +7,16 @@ import {
     aceptarSolicitud,
     rechazarSolicitud,
     verificarSolicitud,
-    actualizarAPendiente
+    actualizarAPendiente,
+    streamSolicitudes
 } from '../controllers/solicitudes.controller.js';
 import { verificarAutenticacion, autenticacionOpcional } from '../middleware/auth.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
+
+// SSE stream (usa token por query param porque EventSource no soporta headers)
+router.get('/stream', streamSolicitudes);
 
 // Rutas públicas (dispositivos sin autenticación)
 router.post('/', createSolicitud);  // Crear solicitud desde dispositivo
