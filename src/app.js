@@ -21,6 +21,8 @@ import departamentosRoutes from './routes/departamentos.routes.js';
 import credencialesRoutes from './routes/credenciales.routes.js';
 import modulosRoutes from './routes/modulos.routes.js';
 import reportesRoutes from './routes/reportes.routes.js';
+import streamRoutes from './routes/stream.routes.js';
+import diasFestivosRoutes from './routes/diasFestivos.routes.js';
 
 const app = express();
 
@@ -64,5 +66,7 @@ app.use('/api/departamentos', departamentosRoutes);
 app.use('/api/credenciales', credencialesRoutes);
 app.use('/api/modulos', modulosRoutes);
 app.use('/api/reportes', reportesRoutes);
+app.use('/api/stream', streamRoutes);
+app.use('/api/dias-festivos', diasFestivosRoutes);
 
 export default app;

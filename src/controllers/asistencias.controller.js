@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { broadcast } from '../utils/sse.js';
 
 const MINUTOS_SEPARACION_TURNOS = 15;
 
@@ -198,6 +199,24 @@ export async function registrarAsistencia(req, res) {
             });
         }
 
+        // VALIDAR SI ES DÍA FESTIVO
+        const hoy = new Date();
+        const fechaHoy = hoy.toISOString().split('T')[0];
+
+        const esFestivo = await pool.query(`
+            SELECT id, nombre, tipo FROM dias_festivos 
+            WHERE fecha = $1 AND es_obligatorio = true AND es_activo = true
+        `, [fechaHoy]);
+
+        if (esFestivo.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Hoy es día festivo: ${esFestivo.rows[0].nombre}`,
+                es_festivo: true,
+                festivo: esFestivo.rows[0]
+            });
+        }
+
         const registrosHoy = await pool.query(`
 SELECT
 a.id,
@@ -283,6 +302,16 @@ VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)
                 empleado_nombre: empleado.rows[0].nombre,
                 tipo: esEntrada ? 'entrada' : 'salida'
             }
+        });
+
+        // Notificar via SSE
+        broadcast('nueva-asistencia', {
+            id: resultado.rows[0].id,
+            empleado_id,
+            empleado_nombre: empleado.rows[0].nombre,
+            estado,
+            tipo: esEntrada ? 'entrada' : 'salida',
+            fecha: new Date()
         });
 
     } catch (error) {

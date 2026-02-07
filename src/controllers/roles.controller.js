@@ -369,9 +369,17 @@ export async function reactivarRol(req, res) {
             detalles: { rol_id: id }
         });
 
+        // Reactivar asignaciones de usuarios a este rol
+        // Nota: Esto reactivará a todos los usuarios que tenían este rol.
+        // Si se desea algo más selectivo en el futuro, se requeriría una lógica más compleja de historial.
+        await pool.query(
+            'UPDATE usuarios_roles SET es_activo = true WHERE rol_id = $1',
+            [id]
+        );
+
         res.json({
             success: true,
-            message: 'Rol reactivado correctamente'
+            message: 'Rol y asignaciones reactivados correctamente'
         });
 
     } catch (error) {

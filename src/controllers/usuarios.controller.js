@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import { pool } from '../config/db.js';
 import { generateId, generateSecurityKey, ID_PREFIXES } from '../utils/idGenerator.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
+import { broadcast } from '../utils/sse.js';
 
 /**
  * GET /api/usuarios
@@ -562,6 +563,12 @@ export async function updateUsuario(req, res) {
             prioridad: PRIORIDADES.BAJA,
             usuario_modificador_id: req.usuario?.id,
             detalles: { usuario_id: id, cambios: req.body }
+        });
+
+        // Notificar via SSE
+        broadcast('usuario-actualizado', {
+            id,
+            ...resultado.rows[0]
         });
 
         res.json({

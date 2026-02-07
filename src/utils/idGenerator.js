@@ -24,7 +24,8 @@ export const ID_PREFIXES = {
     PERMISO: 'PRM',
     USUARIO_ROL: 'URL',
     EMP_DEPTO: 'EDO',
-    AUDITORIA: 'AUD'
+    AUDITORIA: 'AUD',
+    DIA_FESTIVO: 'FES'
 };
 
 /**
@@ -51,7 +52,8 @@ const SEQUENCE_NAMES = {
     PRM: 'seq_permisos',
     URL: 'seq_usuarios_roles',
     EDO: 'seq_empleados_departamentos',
-    AUD: 'seq_auditoria'
+    AUD: 'seq_auditoria',
+    FES: 'seq_dias_festivos'
 };
 
 /**

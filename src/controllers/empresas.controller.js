@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { broadcast } from '../utils/sse.js';
 
 /**
  * GET /api/empresas
@@ -183,6 +184,9 @@ export async function updateEmpresa(req, res) {
                 message: 'Empresa no encontrada'
             });
         }
+
+        // Notificar via SSE
+        broadcast('empresa-actualizada', resultado.rows[0]);
 
         res.json({
             success: true,

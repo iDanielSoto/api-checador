@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
+import { broadcast } from '../utils/sse.js';
 
 /**
  * GET /api/empleados
@@ -15,6 +16,7 @@ export async function getEmpleados(req, res) {
                 e.id,
                 e.rfc,
                 e.nss,
+                e.regimen_laboral,
                 e.fecha_registro,
                 e.horario_id,
                 u.id as usuario_id,
@@ -90,6 +92,7 @@ export async function getEmpleadoById(req, res) {
                 e.id,
                 e.rfc,
                 e.nss,
+                e.regimen_laboral,
                 e.fecha_registro,
                 e.horario_id,
                 e.usuario_id,
@@ -160,16 +163,17 @@ export async function getEmpleadoById(req, res) {
 export async function updateEmpleado(req, res) {
     try {
         const { id } = req.params;
-        const { rfc, nss, horario_id } = req.body;
+        const { rfc, nss, horario_id, regimen_laboral } = req.body;
 
         const resultado = await pool.query(`
             UPDATE empleados SET
                 rfc = COALESCE($1, rfc),
                 nss = COALESCE($2, nss),
-                horario_id = COALESCE($3, horario_id)
-            WHERE id = $4
+                horario_id = COALESCE($3, horario_id),
+                regimen_laboral = COALESCE($4, regimen_laboral)
+            WHERE id = $5
             RETURNING *
-        `, [rfc, nss, horario_id, id]);
+        `, [rfc, nss, horario_id, regimen_laboral, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -187,6 +191,12 @@ export async function updateEmpleado(req, res) {
             empleado_id: id,
             usuario_modificador_id: req.usuario?.id,
             detalles: { cambios: req.body }
+        });
+
+        // Notificar via SSE
+        broadcast('empleado-actualizado', {
+            id,
+            ...req.body
         });
 
         res.json({
@@ -419,7 +429,7 @@ export async function buscarPorRFC(req, res) {
         const { rfc } = req.params;
 
         const resultado = await pool.query(`
-            SELECT e.id, e.rfc, e.nss, u.nombre, u.correo
+            SELECT e.id, e.rfc, e.nss, e.regimen_laboral, u.nombre, u.correo
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             WHERE e.rfc = $1 AND u.estado_cuenta = 'activo'
@@ -455,7 +465,7 @@ export async function buscarPorNSS(req, res) {
         const { nss } = req.params;
 
         const resultado = await pool.query(`
-            SELECT e.id, e.rfc, e.nss, u.nombre, u.correo
+            SELECT e.id, e.rfc, e.nss, e.regimen_laboral, u.nombre, u.correo
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             WHERE e.nss = $1 AND u.estado_cuenta = 'activo'
