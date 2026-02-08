@@ -1,0 +1,19 @@
+Ô£à Conectado a la base de datos PostgreSQL
+Ô£à Test solicitud inserted successfully:
+{
+  id: 'SOL00086',
+  tipo: 'escritorio',
+  nombre: 'Test Device Long IP/MAC',
+  descripcion: 'Dispositivo de prueba para verificar truncamiento visual',
+  correo: 'test@example.com',
+  ip: '2001:0db8:85a3:0000:0000:8a2e:0370:7334, 192.168.1.100 (Dual Stack Example with very long text to test wrapping)',
+  mac: '00:1B:44:11:3A:B7, 00:1B:44:11:3A:B8, 00-B0-D0-63-C2-26 (Multiple MACs to test wrapping capability in the UI)',
+  sistema_operativo: 'Windows 10 Pro',
+  estado: 'pendiente',
+  fecha_registro: 2026-02-08T18:24:34.697Z,
+  fecha_respuesta: null,
+  observaciones: 'Test de verificaci├│n visual',
+  token: '346866',
+  empresa_id: 'EMA00001',
+  dispositivos_temp: null
+}

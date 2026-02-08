@@ -156,6 +156,10 @@ export async function createSolicitud(req, res) {
             dispositivos_temp
         } = req.body;
 
+        // Normalizar IP y MAC (si vienen como array, convertir a string)
+        const ipString = Array.isArray(ip) ? ip.join(', ') : ip;
+        const macString = Array.isArray(mac) ? mac.join(', ') : mac;
+
         if (!tipo || !nombre) {
             return res.status(400).json({
                 success: false,
@@ -163,10 +167,10 @@ export async function createSolicitud(req, res) {
             });
         }
 
-        if (mac) {
+        if (macString) {
             const existente = await pool.query(
                 "SELECT id FROM solicitudes WHERE mac = $1 AND estado = 'pendiente'",
-                [mac]
+                [macString]
             );
             if (existente.rows.length > 0) {
                 return res.status(400).json({
@@ -186,7 +190,7 @@ export async function createSolicitud(req, res) {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, $12)
             RETURNING *
-        `, [id, tipo, nombre, descripcion, correo, ip, mac, sistema_operativo, token, empresa_id, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
+        `, [id, tipo, nombre, descripcion, correo, ipString, macString, sistema_operativo, token, empresa_id, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
 
         // Registrar evento
         await registrarEvento({
