@@ -66,11 +66,12 @@ export async function verificarAutenticacion(req, res, next) {
                 r.permisos_bitwise,
                 r.es_admin,
                 r.es_empleado,
+                r.tolerancia_id,
                 r.posicion
             FROM roles r
             INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
             WHERE ur.usuario_id = $1 AND ur.es_activo = true
-            ORDER BY r.posicion DESC
+            ORDER BY r.posicion ASC
         `, [token]);
 
         // Combinar permisos de todos los roles

@@ -21,12 +21,11 @@ export async function getTolerancias(req, res) {
                 t.aplica_tolerancia_salida,
                 t.dias_aplica,
                 t.fecha_registro,
-                t.rol_id,
                 t.es_activo,
-                r.nombre as rol_nombre,
-                (SELECT COUNT(*) FROM roles r2 WHERE r2.tolerancia_id = t.id) as roles_count
+                r.id as rol_id,
+                r.nombre as rol_nombre
             FROM tolerancias t
-            LEFT JOIN roles r ON r.id = t.rol_id
+            LEFT JOIN roles r ON r.tolerancia_id = t.id
         `;
 
         const params = [];
@@ -64,9 +63,9 @@ export async function getToleranciaById(req, res) {
         const { id } = req.params;
 
         const resultado = await pool.query(`
-            SELECT t.*, r.nombre as rol_nombre
+            SELECT t.*, r.id as rol_id, r.nombre as rol_nombre
             FROM tolerancias t
-            LEFT JOIN roles r ON r.id = t.rol_id
+            LEFT JOIN roles r ON r.tolerancia_id = t.id
             WHERE t.id = $1
         `, [id]);
 
@@ -104,6 +103,8 @@ export async function getToleranciaById(req, res) {
  * Crea una nueva tolerancia
  */
 export async function createTolerancia(req, res) {
+    const client = await pool.connect();
+
     try {
         let {
             nombre,
@@ -114,54 +115,72 @@ export async function createTolerancia(req, res) {
             aplica_tolerancia_entrada = true,
             aplica_tolerancia_salida = false,
             dias_aplica,
-            rol_id
+            rol_id // Si se envía, es para asignar esta tolerancia al rol
         } = req.body;
 
         // Si no se envía nombre pero sí rol_id, tomar el nombre del rol
         if (!nombre && rol_id) {
-            const rol = await pool.query('SELECT nombre FROM roles WHERE id = $1', [rol_id]);
+            const rol = await client.query('SELECT nombre FROM roles WHERE id = $1', [rol_id]);
             if (rol.rows.length > 0) {
                 nombre = `Tolerancia - ${rol.rows[0].nombre}`;
             }
         }
 
         if (!nombre) {
+            client.release();
             return res.status(400).json({
                 success: false,
                 message: 'El nombre es requerido (o proporciona un rol_id para generar uno automático)'
             });
         }
 
+        await client.query('BEGIN');
+
         const id = await generateId(ID_PREFIXES.TOLERANCIA);
 
-        const resultado = await pool.query(`
+        // 1. Insertar tolerancia (SIN rol_id, ya que la FK está en roles)
+        const resultado = await client.query(`
             INSERT INTO tolerancias (
                 id, nombre, minutos_retardo, minutos_falta,
                 permite_registro_anticipado, minutos_anticipado_max,
-                aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica, rol_id
+                aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
         `, [
             id, nombre, minutos_retardo, minutos_falta,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            dias_aplica ? JSON.stringify(dias_aplica) : null,
-            rol_id || null
+            dias_aplica ? JSON.stringify(dias_aplica) : null
         ]);
+
+        // 2. Si se especificó un rol, actualizar el rol para que apunte a esta tolerancia
+        if (rol_id) {
+            await client.query(`
+                UPDATE roles SET tolerancia_id = $1 WHERE id = $2
+            `, [id, rol_id]);
+        }
+
+        await client.query('COMMIT');
 
         res.status(201).json({
             success: true,
             message: 'Tolerancia creada correctamente',
-            data: resultado.rows[0]
+            data: {
+                ...resultado.rows[0],
+                rol_id: rol_id || null // Devolver rol_id para que el frontend lo reconozca
+            }
         });
 
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error en createTolerancia:', error);
         res.status(500).json({
             success: false,
             message: 'Error al crear tolerancia'
         });
+    } finally {
+        client.release();
     }
 }
 
@@ -170,6 +189,8 @@ export async function createTolerancia(req, res) {
  * Actualiza una tolerancia existente
  */
 export async function updateTolerancia(req, res) {
+    const client = await pool.connect();
+
     try {
         const { id } = req.params;
         const {
@@ -186,7 +207,10 @@ export async function updateTolerancia(req, res) {
 
         const diasJson = dias_aplica ? JSON.stringify(dias_aplica) : null;
 
-        const resultado = await pool.query(`
+        await client.query('BEGIN');
+
+        // 1. Actualizar tolerancia
+        const resultado = await client.query(`
             UPDATE tolerancias SET
                 nombre = COALESCE($1, nombre),
                 minutos_retardo = COALESCE($2, minutos_retardo),
@@ -196,36 +220,60 @@ export async function updateTolerancia(req, res) {
                 aplica_tolerancia_entrada = COALESCE($6, aplica_tolerancia_entrada),
                 aplica_tolerancia_salida = COALESCE($7, aplica_tolerancia_salida),
                 dias_aplica = COALESCE($8, dias_aplica)
-                ${rol_id !== undefined ? ', rol_id = $10' : ''}
             WHERE id = $9
             RETURNING *
         `, [
             nombre, minutos_retardo, minutos_falta,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            diasJson, id,
-            ...(rol_id !== undefined ? [rol_id || null] : [])
+            diasJson, id
         ]);
 
         if (resultado.rows.length === 0) {
+            await client.query('ROLLBACK');
             return res.status(404).json({
                 success: false,
                 message: 'Tolerancia no encontrada'
             });
         }
 
+        // 2. Si se especificó un rol, actualizar el rol
+        if (rol_id !== undefined) {
+            // Si rol_id es null, significa desvincular? 
+            // La lógica actual de createTolerancia (anterior) permitía null.
+            // Si se envía un ID, asignamos. Si se envía null, quizás desasignamos?
+            // Asumiremos que si se envía un valor explícito, se actualiza.
+            if (rol_id) {
+                // Verificar si este rol ya tenía otra tolerancia y reemplazarla
+                await client.query(`UPDATE roles SET tolerancia_id = $1 WHERE id = $2`, [id, rol_id]);
+            } else {
+                // Si rol_id es null o false, no hacemos nada o desvinculamos?
+                // El frontend envía rol_id=null para "General". Pero "General" no es un rol en la DB.
+                // Si estoy editando la tolerancia "General", rol_id será null.
+                // No necesitamos actualizar roles en ese caso.
+            }
+        }
+
+        await client.query('COMMIT');
+
         res.json({
             success: true,
             message: 'Tolerancia actualizada correctamente',
-            data: resultado.rows[0]
+            data: {
+                ...resultado.rows[0],
+                rol_id: rol_id || null
+            }
         });
 
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error en updateTolerancia:', error);
         res.status(500).json({
             success: false,
             message: 'Error al actualizar tolerancia'
         });
+    } finally {
+        client.release();
     }
 }
 

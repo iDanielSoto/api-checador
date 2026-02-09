@@ -54,8 +54,8 @@ export const PERMISOS = {
     // REPORTES (26)
     REPORTE_EXPORTAR: 26,
 
-    // SISTEMA (63) - Reservado para super admin
-    SUPER_ADMIN: 63
+    // SISTEMA (62) - Reservado para super admin
+    SUPER_ADMIN: 62
 };
 
 /**

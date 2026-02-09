@@ -10,8 +10,8 @@ import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
  */
 export function iniciarCronFaltas() {
     // Min Hour DayMonth Month DayWeek
-    // 55  23   *        *     1-5 (lunes a viernes)
-    cron.schedule('55 23 * * 1-5', async () => {
+    // 00  00   *        *     1-5 (lunes a viernes)
+    cron.schedule('59 23 * * 1-7', async () => {
         console.log(`[CRON FALTAS] Iniciando revisión de faltas - ${new Date().toLocaleString()}`);
         try {
             await registrarFaltasDelDia();
@@ -22,7 +22,7 @@ export function iniciarCronFaltas() {
         timezone: 'America/Mexico_City'
     });
 
-    console.log('[CRON FALTAS] Programado: lunes a viernes a las 23:55 (America/Mexico_City)');
+    console.log('[CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City)');
 }
 
 async function registrarFaltasDelDia() {
@@ -79,7 +79,7 @@ async function registrarFaltasDelDia() {
             const id = await generateId(ID_PREFIXES.ASISTENCIA);
             await pool.query(`
                 INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id)
-                VALUES($1, 'falta', 'sistema', $2, $3)
+                VALUES($1, 'falta', 'escritorio', $2, $3)
             `, [id, emp.empleado_id, departamentoId]);
 
             // Registrar evento
@@ -95,7 +95,7 @@ async function registrarFaltasDelDia() {
                 JSON.stringify({
                     asistencia_id: id,
                     estado: 'falta',
-                    dispositivo_origen: 'sistema',
+                    dispositivo_origen: 'escritorio',
                     tipo: 'entrada',
                     departamento_id: departamentoId,
                     automatico: true

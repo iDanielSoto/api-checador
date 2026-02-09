@@ -4,9 +4,12 @@ import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
+// Ruta pública para listar empresas (necesaria para el login)
+router.get('/', getEmpresas);
+
 router.use(verificarAutenticacion);
 
-router.get('/', requirePermiso('CONFIGURACION_VER'), getEmpresas);
+router.get('/:id', requirePermiso('CONFIGURACION_VER'), getEmpresaById);
 router.get('/:id', requirePermiso('CONFIGURACION_VER'), getEmpresaById);
 router.post('/', requirePermiso('CONFIGURACION_MODIFICAR'), createEmpresa);
 router.put('/:id', requirePermiso('CONFIGURACION_MODIFICAR'), updateEmpresa);

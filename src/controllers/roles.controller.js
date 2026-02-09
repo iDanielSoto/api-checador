@@ -38,7 +38,7 @@ export async function getRoles(req, res) {
             query += ` WHERE r.es_activo = true`;
         }
 
-        query += ` ORDER BY r.posicion DESC`;
+        query += ` ORDER BY r.posicion ASC`;
 
         const resultado = await pool.query(query, params);
 

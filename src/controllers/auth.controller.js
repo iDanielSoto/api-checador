@@ -73,11 +73,12 @@ export async function login(req, res) {
                 r.permisos_bitwise,
                 r.es_admin,
                 r.es_empleado,
+                r.tolerancia_id,
                 r.posicion
             FROM roles r
             INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
             WHERE ur.usuario_id = $1 AND ur.es_activo = true
-            ORDER BY r.posicion DESC
+            ORDER BY r.posicion ASC
         `, [usuarioData.id]);
 
         // Combinar permisos de todos los roles
@@ -358,7 +359,7 @@ export async function loginBiometrico(req, res) {
             FROM roles r
             INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
             WHERE ur.usuario_id = $1 AND ur.es_activo = true
-            ORDER BY r.posicion DESC
+            ORDER BY r.posicion ASC
         `, [usuarioData.id]);
 
         let permisosCombinadosBigInt = BigInt(0);

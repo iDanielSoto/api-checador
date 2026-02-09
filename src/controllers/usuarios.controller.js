@@ -134,10 +134,11 @@ export async function getUsuarioById(req, res) {
 
         // Obtener roles del usuario
         const rolesResult = await pool.query(`
-            SELECT r.id, r.nombre, r.descripcion, r.es_admin, r.es_empleado, r.posicion
+            SELECT r.id, r.nombre, r.descripcion, r.es_admin, r.es_empleado, r.tolerancia_id, r.posicion
             FROM roles r
             INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
             WHERE ur.usuario_id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion ASC
         `, [id]);
 
         // Obtener departamentos del empleado
@@ -694,12 +695,13 @@ export async function getRolesDeUsuario(req, res) {
                 r.permisos_bitwise,
                 r.es_admin,
                 r.es_empleado,
+                r.tolerancia_id,
                 r.posicion,
                 ur.fecha_registro as fecha_asignacion
             FROM roles r
             INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
             WHERE ur.usuario_id = $1 AND ur.es_activo = true
-            ORDER BY r.posicion DESC
+            ORDER BY r.posicion ASC
         `, [id]);
 
         res.json({
