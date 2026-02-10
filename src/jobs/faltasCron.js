@@ -50,7 +50,9 @@ async function registrarFaltasDelDia() {
     for (const emp of empleados.rows) {
         try {
             // Verificar si el empleado tenía turno hoy
-            if (!tieneTurnoHoy(emp.configuracion, diaHoy)) {
+            const turnoHoy = getTurnoHoy(emp.configuracion, diaHoy);
+
+            if (!turnoHoy) {
                 continue;
             }
 
@@ -75,18 +77,23 @@ async function registrarFaltasDelDia() {
 
             const departamentoId = depto.rows.length > 0 ? depto.rows[0].departamento_id : null;
 
-            // Registrar falta
+            // Calcular fecha de registro basada en la hora de entrada del turno
+            const [hora, minuto] = turnoHoy.entrada.split(':');
+            const fechaRegistro = new Date();
+            fechaRegistro.setHours(parseInt(hora), parseInt(minuto), 0, 0);
+
+            // Registrar falta con la fecha calculada
             const id = await generateId(ID_PREFIXES.ASISTENCIA);
             await pool.query(`
-                INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id)
-                VALUES($1, 'falta', 'escritorio', $2, $3)
-            `, [id, emp.empleado_id, departamentoId]);
+                INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, fecha_registro)
+                VALUES($1, 'falta', 'escritorio', $2, $3, $4)
+            `, [id, emp.empleado_id, departamentoId, fechaRegistro.toISOString()]);
 
             // Registrar evento
             const eventoId = await generateId(ID_PREFIXES.EVENTO);
             await pool.query(`
-                INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
-                VALUES($1, $2, $3, 'asistencia', 'media', $4, $5)
+                INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro)
+                VALUES($1, $2, $3, 'asistencia', 'media', $4, $5, $6)
             `, [
                 eventoId,
                 'Falta registrada automáticamente',
@@ -98,8 +105,10 @@ async function registrarFaltasDelDia() {
                     dispositivo_origen: 'escritorio',
                     tipo: 'entrada',
                     departamento_id: departamentoId,
-                    automatico: true
-                })
+                    automatico: true,
+                    horario_turno: turnoHoy
+                }),
+                fechaRegistro.toISOString() // Usar la misma fecha para el evento
             ]);
 
             faltasRegistradas++;
@@ -111,27 +120,35 @@ async function registrarFaltasDelDia() {
     console.log(`[CRON FALTAS] Finalizado. Faltas registradas: ${faltasRegistradas}`);
 }
 
-function tieneTurnoHoy(configuracion, diaHoy) {
+function getTurnoHoy(configuracion, diaHoy) {
     try {
         const config = typeof configuracion === 'string'
             ? JSON.parse(configuracion)
             : configuracion;
 
-        if (!config) return false;
+        if (!config) return null;
 
         // Opción 1: configuracion_semanal
         if (config.configuracion_semanal) {
             const turnosDia = config.configuracion_semanal[diaHoy];
-            return turnosDia && turnosDia.length > 0;
+            if (turnosDia && turnosDia.length > 0) {
+                // Retornar el primer turno (entrada: 'HH:MM', salida: 'HH:MM')
+                return {
+                    entrada: turnosDia[0].inicio,
+                    salida: turnosDia[0].fin
+                };
+            }
         }
 
         // Opción 2: dias + turnos
-        if (config.dias) {
-            return config.dias.includes(diaHoy);
+        if (config.dias && config.dias.includes(diaHoy)) {
+            if (config.turnos && config.turnos.length > 0) {
+                return config.turnos[0];
+            }
         }
 
-        return false;
+        return null;
     } catch {
-        return false;
+        return null;
     }
 }
