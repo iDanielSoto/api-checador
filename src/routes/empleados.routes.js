@@ -10,6 +10,7 @@ import {
     buscarPorRFC,
     buscarPorNSS
 } from '../controllers/empleados.controller.js';
+import { getAvisosDeEmpleado } from '../controllers/avisos.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { requirePermiso, requirePermisoOrSelf } from '../middleware/permissions.middleware.js';
 
@@ -34,6 +35,9 @@ router.delete('/:id/departamentos/:deptoId', requirePermiso('DEPARTAMENTO_ASIGNA
 
 // Obtener horario de empleado
 router.get('/:id/horario', requirePermisoOrSelf('id', 'HORARIO_VER'), getHorarioDeEmpleado);
+
+// Obtener avisos específicos del empleado
+router.get('/:id/avisos', requirePermisoOrSelf('id', 'USUARIO_VER'), getAvisosDeEmpleado);
 
 
 export default router;
