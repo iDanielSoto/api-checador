@@ -24,7 +24,7 @@ export async function getAllAvisos(req, res) {
         const avisos = await Promise.all(resultado.rows.map(async (aviso) => {
             if (!aviso.es_global) {
                 const empleados = await pool.query(`
-                    SELECT e.id, u.nombre
+                    SELECT e.id, u.id as usuario_id, u.nombre
                     FROM empleados e
                     INNER JOIN avisos_empleados ae ON ae.empleado_id = e.id
                     INNER JOIN usuarios u ON u.id = e.usuario_id

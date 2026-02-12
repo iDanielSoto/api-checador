@@ -24,6 +24,7 @@ import reportesRoutes from './routes/reportes.routes.js';
 import streamRoutes from './routes/stream.routes.js';
 import diasFestivosRoutes from './routes/diasFestivos.routes.js';
 import avisosRoutes from './routes/avisos.routes.js';
+import escritorioSyncRoutes from './routes/escritorio.sync.routes.js';
 
 const app = express();
 
@@ -70,5 +71,6 @@ app.use('/api/reportes', reportesRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/dias-festivos', diasFestivosRoutes);
 app.use('/api/avisos', avisosRoutes);
+app.use('/api/escritorio/sync', escritorioSyncRoutes);
 
 export default app;
