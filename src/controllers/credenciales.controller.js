@@ -396,6 +396,7 @@ export async function loginPorPin(req, res) {
                 u.nombre, 
                 u.correo, 
                 u.usuario,
+                u.telefono,
                 u.foto,
                 u.es_empleado
             FROM credenciales c
@@ -442,6 +443,7 @@ export async function loginPorPin(req, res) {
                     correo: datos.correo,
                     nombre: datos.nombre,
                     foto: datos.foto,
+                    telefono: datos.telefono,
                     es_empleado: true, // Si tiene credenciales, es empleado
                     empleado_id: datos.empleado_id
                 },
