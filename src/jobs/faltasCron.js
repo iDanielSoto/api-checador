@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import logger from '../utils/logger.js';
 
 /**
  * Cron job que registra faltas automáticas para empleados
@@ -12,17 +13,17 @@ export function iniciarCronFaltas() {
     // Min Hour DayMonth Month DayWeek
     // 00  00   *        *     1-5 (lunes a viernes)
     cron.schedule('59 23 * * 1-7', async () => {
-        console.log(`[CRON FALTAS] Iniciando revisión de faltas - ${new Date().toLocaleString()}`);
+        logger.info(`[CRON FALTAS] Iniciando revisión de faltas - ${new Date().toLocaleString()}`);
         try {
             await registrarFaltasDelDia();
         } catch (error) {
-            console.error('[CRON FALTAS] Error:', error);
+            logger.error('[CRON FALTAS] Error:', error);
         }
     }, {
         timezone: 'America/Mexico_City'
     });
 
-    console.log('[CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City)');
+    logger.info('[CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City)');
 }
 
 async function registrarFaltasDelDia() {
@@ -41,9 +42,31 @@ async function registrarFaltasDelDia() {
     `);
 
     if (empleados.rows.length === 0) {
-        console.log('[CRON FALTAS] No hay empleados activos con horario.');
+        logger.info('[CRON FALTAS] No hay empleados activos con horario.');
         return;
     }
+
+    // 1. Obtener todas las asistencias del día en una sola consulta
+    const asistenciasHoyResult = await pool.query(`
+        SELECT empleado_id FROM asistencias
+        WHERE DATE(fecha_registro) = CURRENT_DATE
+    `);
+    const empleadosConAsistencia = new Set(asistenciasHoyResult.rows.map(a => a.empleado_id));
+
+    // 2. Obtener departamentos de todos los empleados
+    const deptosResult = await pool.query(`
+        SELECT empleado_id, departamento_id 
+        FROM empleados_departamentos
+        WHERE es_activo = true
+    `);
+
+    // Mapa: empleado_id -> departamento_id (tomamos el primero que encontremos, igual que antes con LIMIT 1)
+    const deptosMap = new Map();
+    deptosResult.rows.forEach(d => {
+        if (!deptosMap.has(d.empleado_id)) {
+            deptosMap.set(d.empleado_id, d.departamento_id);
+        }
+    });
 
     let faltasRegistradas = 0;
 
@@ -56,26 +79,12 @@ async function registrarFaltasDelDia() {
                 continue;
             }
 
-            // Verificar si ya tiene algún registro de asistencia hoy
-            const asistenciaHoy = await pool.query(`
-                SELECT id FROM asistencias
-                WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE
-                LIMIT 1
-            `, [emp.empleado_id]);
-
-            if (asistenciaHoy.rows.length > 0) {
-                // Ya tiene al menos un registro, no marcar falta
+            // Verificar si ya tiene asistencia hoy (en memoria)
+            if (empleadosConAsistencia.has(emp.empleado_id)) {
                 continue;
             }
 
-            // Obtener un departamento del empleado (para el registro)
-            const depto = await pool.query(`
-                SELECT departamento_id FROM empleados_departamentos
-                WHERE empleado_id = $1 AND es_activo = true
-                LIMIT 1
-            `, [emp.empleado_id]);
-
-            const departamentoId = depto.rows.length > 0 ? depto.rows[0].departamento_id : null;
+            const departamentoId = deptosMap.get(emp.empleado_id) || null;
 
             // Calcular fecha de registro basada en la hora de entrada del turno
             const [hora, minuto] = turnoHoy.entrada.split(':');
@@ -108,16 +117,16 @@ async function registrarFaltasDelDia() {
                     automatico: true,
                     horario_turno: turnoHoy
                 }),
-                fechaRegistro.toISOString() // Usar la misma fecha para el evento
+                fechaRegistro.toISOString()
             ]);
 
             faltasRegistradas++;
         } catch (error) {
-            console.error(`[CRON FALTAS] Error con empleado ${emp.empleado_id}:`, error.message);
+            logger.error(`[CRON FALTAS] Error con empleado ${emp.empleado_id}:`, error);
         }
     }
 
-    console.log(`[CRON FALTAS] Finalizado. Faltas registradas: ${faltasRegistradas}`);
+    logger.info(`[CRON FALTAS] Finalizado. Faltas registradas: ${faltasRegistradas}`);
 }
 
 function getTurnoHoy(configuracion, diaHoy) {

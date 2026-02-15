@@ -345,7 +345,7 @@ export async function updateUsuario(req, res) {
             [id]
         );
         if (existe.rows.length === 0) {
-            client.release();
+            // client.release() removido porque hay un finally
             return res.status(404).json({
                 success: false,
                 message: 'Usuario no encontrado'
@@ -354,17 +354,17 @@ export async function updateUsuario(req, res) {
 
         const esEmpleadoActual = existe.rows[0].es_empleado;
 
-        // Verificar unicidad de usuario/correo si se cambian
-        if (usuario || correo) {
+        // Verificar unicidad de usuario si se cambia
+        if (usuario) {
             const duplicado = await client.query(
-                'SELECT id FROM usuarios WHERE (usuario = $1 OR correo = $2) AND id != $3',
-                [usuario, correo, id]
+                'SELECT id FROM usuarios WHERE usuario = $1 AND id != $2',
+                [usuario, id]
             );
             if (duplicado.rows.length > 0) {
-                client.release();
+                // client.release() removido porque hay un finally
                 return res.status(400).json({
                     success: false,
-                    message: 'El usuario o correo ya está en uso'
+                    message: 'El nombre de usuario ya está en uso'
                 });
             }
         }
@@ -885,13 +885,13 @@ export async function getUsuarioByUsername(req, res) {
             }
         }
 
-        // Remover ID del response para el perfil público
-        const { id, horario_id, ...usuarioSinIds } = usuario;
+        // Remover informacion sensible pero MANTENER EL ID
+        const { contraseña, ...usuarioSeguro } = usuario;
 
         res.json({
             success: true,
             data: {
-                ...usuarioSinIds,
+                ...usuarioSeguro,
                 roles: rolesResult.rows,
                 horario
             }

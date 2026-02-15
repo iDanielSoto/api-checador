@@ -9,7 +9,8 @@ import {
     eliminarCredencial,
     getCredencialesPublico,
     getDactilarByEmpleado,
-    identificarPorFacial
+    identificarPorFacial,
+    loginPorPin
 } from '../controllers/credenciales.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
@@ -19,6 +20,10 @@ const router = Router();
 
 router.get('/publico/lista', getCredencialesPublico);
 router.get('/publico/dactilar/:empleadoId', getDactilarByEmpleado);
+
+// Ruta PÚBLICA (sin middleware de autenticación)
+router.post('/facial/identify', identificarPorFacial);
+router.post('/pin/login', loginPorPin);
 
 // Middleware de autenticación para las demás rutas
 router.use(verificarAutenticacion);
@@ -31,7 +36,6 @@ router.post('/facial', requirePermiso('USUARIO_MODIFICAR'), guardarFacial);
 router.post('/pin', requirePermiso('USUARIO_MODIFICAR'), guardarPin);
 router.post('/verificar-pin', verificarPin);
 router.delete('/empleado/:empleadoId', requirePermiso('USUARIO_MODIFICAR'), eliminarCredencial);
-// Ruta PÚBLICA (sin middleware de autenticación)
-router.post('/facial/identify', identificarPorFacial);
+
 
 export default router;

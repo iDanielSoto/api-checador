@@ -107,6 +107,20 @@ export async function createEscritorio(req, res) {
             dispositivos_biometricos
         } = req.body;
 
+        if (ip && ip.length > 45) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección IP no debe exceder los 45 caracteres'
+            });
+        }
+
+        if (mac && mac.length > 17) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección MAC no debe exceder los 17 caracteres'
+            });
+        }
+
         if (!nombre) {
             return res.status(400).json({
                 success: false,
@@ -177,6 +191,20 @@ export async function updateEscritorio(req, res) {
             dispositivos_biometricos,
             es_activo
         } = req.body;
+
+        if (ip && ip.length > 45) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección IP no debe exceder los 45 caracteres'
+            });
+        }
+
+        if (mac && mac.length > 17) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección MAC no debe exceder los 17 caracteres'
+            });
+        }
 
         const bioJson = dispositivos_biometricos ? JSON.stringify(dispositivos_biometricos) : null;
 

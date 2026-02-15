@@ -54,15 +54,38 @@ export async function getEmpleados(req, res) {
 
         const resultado = await pool.query(query, params);
 
-        // Obtener departamentos de cada empleado
-        for (const empleado of resultado.rows) {
-            const deptos = await pool.query(`
-                SELECT d.id, d.nombre, d.color
+        // Optimización N+1: Obtener departamentos de todos los empleados en una sola consulta
+        if (resultado.rows.length > 0) {
+            const empleadoIds = resultado.rows.map(e => e.id);
+
+            const deptosResult = await pool.query(`
+                SELECT 
+                    d.id, 
+                    d.nombre, 
+                    d.color,
+                    ed.empleado_id
                 FROM departamentos d
                 INNER JOIN empleados_departamentos ed ON ed.departamento_id = d.id
-                WHERE ed.empleado_id = $1 AND ed.es_activo = true
-            `, [empleado.id]);
-            empleado.departamentos = deptos.rows;
+                WHERE ed.empleado_id = ANY($1) AND ed.es_activo = true
+            `, [empleadoIds]);
+
+            // Agrupar departamentos por empleado
+            const deptosPorEmpleado = {};
+            deptosResult.rows.forEach(d => {
+                if (!deptosPorEmpleado[d.empleado_id]) {
+                    deptosPorEmpleado[d.empleado_id] = [];
+                }
+                deptosPorEmpleado[d.empleado_id].push({
+                    id: d.id,
+                    nombre: d.nombre,
+                    color: d.color
+                });
+            });
+
+            // Asignar a cada empleado
+            resultado.rows.forEach(empleado => {
+                empleado.departamentos = deptosPorEmpleado[empleado.id] || [];
+            });
         }
 
         res.json({

@@ -17,99 +17,117 @@ export const getMisDatos = async (req, res) => {
         }
 
         // ========== EMPLEADO ==========
-        const empResult = await pool.query(`
-            SELECT
-                e.id,
-                e.usuario_id,
-                u.nombre,
-                u.usuario,
-                u.correo,
-                u.foto,
-                (u.estado_cuenta = 'activo') as es_activo,
-                e.rfc,
-                e.horario_id
-            FROM empleados e
-            INNER JOIN usuarios u ON e.usuario_id = u.id
-            WHERE e.id = $1
-        `, [empleado_id]);
+        let empleado;
+        try {
+            const empResult = await pool.query(`
+                SELECT
+                    e.id,
+                    e.usuario_id,
+                    u.nombre,
+                    u.usuario,
+                    u.correo,
+                    u.foto,
+                    (u.estado_cuenta = 'activo') as es_activo,
+                    e.rfc,
+                    e.horario_id
+                FROM empleados e
+                INNER JOIN usuarios u ON e.usuario_id = u.id
+                WHERE e.id = $1
+            `, [empleado_id]);
 
-        if (empResult.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                error: 'Empleado no encontrado'
-            });
+            if (empResult.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Empleado no encontrado'
+                });
+            }
+            empleado = empResult.rows[0];
+            // FIX: el cliente espera empleado.empleado_id para el upsert en SQLite
+            empleado.empleado_id = empleado.id;
+        } catch (empError) {
+            console.error('❌ [movilSync] Error en query EMPLEADO:', empError);
+            return res.status(500).json({ success: false, error: `Error en query empleado: ${empError.message}` });
         }
 
-        const empleado = empResult.rows[0];
-
         // ========== CREDENCIALES ==========
-        // Se asume que credenciales usa empleado_id
-        const credResult = await pool.query(`
-            SELECT
-                id,
-                empleado_id,
-                pin,
-                dactilar,
-                facial
-            FROM credenciales
-            WHERE empleado_id = $1
-        `, [empleado_id]);
-
-        const credencial = credResult.rows.length > 0 ? credResult.rows[0] : null;
+        let credencial = null;
+        try {
+            const credResult = await pool.query(`
+                SELECT
+                    id,
+                    empleado_id,
+                    pin,
+                    dactilar,
+                    facial
+                FROM credenciales
+                WHERE empleado_id = $1
+            `, [empleado_id]);
+            credencial = credResult.rows.length > 0 ? credResult.rows[0] : null;
+        } catch (credError) {
+            console.error('❌ [movilSync] Error en query CREDENCIALES:', credError);
+            return res.status(500).json({ success: false, error: `Error en query credenciales: ${credError.message}` });
+        }
 
         // ========== TOLERANCIA (vía rol del usuario) ==========
         let tolerancia = null;
-        // Usuarios_roles: usuario_id, rol_id
-        // Roles: id, id_tolerancia (o tolerancia_id dependiendo de corrección anterior)
-        // En escritorio.sync.controller vimos 'r.id_tolerancia AS tolerancia_id'
-        const rolResult = await pool.query(`
-            SELECT
-                ur.rol_id,
-                r.tolerancia_id
-            FROM usuarios_roles ur
-            INNER JOIN roles r ON ur.rol_id = r.id
-            WHERE ur.usuario_id = $1 AND ur.es_activo = true
-            LIMIT 1
-        `, [empleado.usuario_id]);
-
-        if (rolResult.rows.length > 0 && rolResult.rows[0].tolerancia_id) {
-            const tolResult = await pool.query(`
+        try {
+            const rolResult = await pool.query(`
                 SELECT
-                    id,
-                    nombre,
-                    minutos_retardo,
-                    minutos_falta,
-                    permite_registro_anticipado,
-                    minutos_anticipado_max,
-                    aplica_tolerancia_entrada,
-                    aplica_tolerancia_salida
-                FROM tolerancias
-                WHERE id = $1
-            `, [rolResult.rows[0].tolerancia_id]);
+                    ur.rol_id,
+                    r.tolerancia_id
+                FROM usuarios_roles ur
+                INNER JOIN roles r ON ur.rol_id = r.id
+                WHERE ur.usuario_id = $1 AND ur.es_activo = true
+                LIMIT 1
+            `, [empleado.usuario_id]);
 
-            if (tolResult.rows.length > 0) {
-                tolerancia = tolResult.rows[0];
+            if (rolResult.rows.length > 0 && rolResult.rows[0].tolerancia_id) {
+                const tolResult = await pool.query(`
+                    SELECT
+                        id,
+                        nombre,
+                        minutos_retardo,
+                        minutos_falta,
+                        permite_registro_anticipado,
+                        minutos_anticipado_max,
+                        aplica_tolerancia_entrada,
+                        aplica_tolerancia_salida
+                    FROM tolerancias
+                    WHERE id = $1
+                `, [rolResult.rows[0].tolerancia_id]);
+
+                if (tolResult.rows.length > 0) {
+                    tolerancia = tolResult.rows[0];
+                }
             }
+        } catch (tolError) {
+            console.error('❌ [movilSync] Error en query TOLERANCIA:', tolError);
+            return res.status(500).json({ success: false, error: `Error en query tolerancia: ${tolError.message}` });
         }
 
         // ========== DEPARTAMENTOS ==========
-        // empleados_departamentos: empleado_id, departamento_id
-        // departamentos: id, nombre
-        const deptoResult = await pool.query(`
-            SELECT
-                ed.empleado_id,
-                ed.departamento_id,
-                ed.es_activo,
-                d.nombre,
-                d.descripcion,
-                d.ubicacion,
-                d.color
-            FROM empleados_departamentos ed
-            INNER JOIN departamentos d ON ed.departamento_id = d.id
-            WHERE ed.empleado_id = $1
-        `, [empleado_id]);
-
-        const departamentos = deptoResult.rows;
+        let departamentos = [];
+        try {
+            // FIX: incluir latitud, longitud y radio que el cliente SQLite necesita
+            // para geolocalización al registrar asistencia
+            const deptoResult = await pool.query(`
+                SELECT
+                    ed.empleado_id,
+                    ed.departamento_id,
+                    ed.es_activo,
+                    d.nombre,
+                    d.descripcion,
+                    d.ubicacion,
+                    d.color
+                FROM empleados_departamentos ed
+                INNER JOIN departamentos d ON ed.departamento_id = d.id
+                WHERE ed.empleado_id = $1
+            `, [empleado_id]);
+            departamentos = deptoResult.rows;
+        } catch (depError) {
+            console.error('❌ [movilSync] Error en query DEPARTAMENTOS:', depError);
+            return res.status(500).json({ success: false, error: `Error en query departamentos: ${depError.message}` });
+        }
 
         // ========== RESPUESTA ==========
         res.json({
@@ -122,13 +140,14 @@ export const getMisDatos = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('❌ [movilSync] Error en getMisDatos:', error);
+        console.error('❌ [movilSync] Error general en getMisDatos:', error);
         res.status(500).json({
             success: false,
-            error: 'Error al obtener datos del empleado'
+            error: `Error general: ${error.message}`
         });
     }
 };
+
 
 /**
  * POST /api/movil/sync/asistencias
@@ -278,12 +297,15 @@ export const sincronizarSesiones = async (req, res) => {
         }
 
         // Crear tabla si no existe (auto-migración)
-        // Usamos plural sesiones_movil para consistencia
+        // SIN foreign keys para evitar violaciones con IDs de sesiones offline
+        // FIX: usar IF NOT EXISTS y evitar recrear en cada request
+        // FIX: usuario_id y empleado_id como TEXT para coincidir con IDs alfanuméricos
+        // del generador de IDs del sistema (ID_PREFIXES genera strings, no integers)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS sesiones_movil (
                 id SERIAL PRIMARY KEY,
-                usuario_id VARCHAR(8) REFERENCES usuarios(id),
-                empleado_id VARCHAR(8) REFERENCES empleados(id),
+                usuario_id TEXT,
+                empleado_id TEXT,
                 tipo VARCHAR(10) NOT NULL,
                 modo VARCHAR(20) NOT NULL DEFAULT 'offline',
                 fecha_evento TIMESTAMP NOT NULL,
@@ -292,6 +314,45 @@ export const sincronizarSesiones = async (req, res) => {
             )
         `);
 
+        // Migración: si la tabla vieja tiene FK constraints, recrearla sin ellos
+        try {
+            const fkCheck = await pool.query(`
+                SELECT COUNT(*) as fk_count
+                FROM information_schema.table_constraints
+                WHERE table_name = 'sesiones_movil'
+                  AND constraint_type = 'FOREIGN KEY'
+            `);
+            if (parseInt(fkCheck.rows[0].fk_count) > 0) {
+                console.log('🔧 [movilSync] Migrando sesiones_movil: eliminando foreign keys...');
+                // Guardar datos existentes
+                const backup = await pool.query('SELECT * FROM sesiones_movil');
+                await pool.query('DROP TABLE sesiones_movil');
+                await pool.query(`
+                    CREATE TABLE sesiones_movil (
+                        id SERIAL PRIMARY KEY,
+                        usuario_id TEXT,
+                        empleado_id TEXT,
+                        tipo VARCHAR(10) NOT NULL,
+                        modo VARCHAR(20) NOT NULL DEFAULT 'offline',
+                        fecha_evento TIMESTAMP NOT NULL,
+                        dispositivo VARCHAR(50) DEFAULT 'movil',
+                        recibido_at TIMESTAMP DEFAULT NOW()
+                    )
+                `);
+                // Restaurar datos
+                for (const row of backup.rows) {
+                    await pool.query(
+                        `INSERT INTO sesiones_movil (usuario_id, empleado_id, tipo, modo, fecha_evento, dispositivo, recibido_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                        [row.usuario_id, row.empleado_id, row.tipo, row.modo, row.fecha_evento, row.dispositivo, row.recibido_at]
+                    );
+                }
+                console.log(`🔧 [movilSync] Migración completada. ${backup.rows.length} registros restaurados.`);
+            }
+        } catch (migError) {
+            console.error('⚠️ [movilSync] Error en migración FK (no crítico):', migError.message);
+        }
+
         const sincronizados = [];
         const errores = [];
 
@@ -299,6 +360,18 @@ export const sincronizarSesiones = async (req, res) => {
             try {
                 if (!s.usuario_id || !s.tipo || !s.fecha_evento) {
                     errores.push({ local_id: s.local_id, error: 'Campos requeridos faltantes' });
+                    continue;
+                }
+
+                // FIX: verificar que el usuario existe antes de insertar
+                // para no fallar silenciosamente por FK
+                const usuarioExiste = await pool.query(
+                    'SELECT id FROM usuarios WHERE id = $1',
+                    [s.usuario_id]
+                );
+
+                if (usuarioExiste.rows.length === 0) {
+                    errores.push({ local_id: s.local_id, error: `usuario_id ${s.usuario_id} no existe en BD` });
                     continue;
                 }
 
@@ -317,7 +390,7 @@ export const sincronizarSesiones = async (req, res) => {
                 sincronizados.push({ local_id: s.local_id });
 
             } catch (sError) {
-                // Si falla por foreign key (empleado_id es texto, usuario_id int)
+                console.error(`❌ [movilSync] Error insertando sesión local_id=${s.local_id}:`, sError.message);
                 errores.push({ local_id: s.local_id, error: sError.message });
             }
         }
@@ -335,6 +408,52 @@ export const sincronizarSesiones = async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Error al sincronizar sesiones'
+        });
+    }
+
+};
+
+/**
+     * GET /api/movil/sync/dispositivos/:empleadoId
+     * 
+     * Verificación pública de dispositivos por empleado.
+     * Devuelve la lista de dispositivos activos asociados al empleado.
+     */
+export const verificarDispositivosEmpleado = async (req, res) => {
+    try {
+        const { empleadoId } = req.params;
+
+        if (!empleadoId) {
+            return res.status(400).json({
+                success: false,
+                error: 'empleadoId es requerido'
+            });
+        }
+
+        const resultado = await pool.query(`
+            SELECT
+                id,
+                sistema_operativo,
+                es_root,
+                fecha_registro,
+                ip,
+                mac
+            FROM movil
+            WHERE empleado_id = $1 AND es_activo = true
+        `, [empleadoId]);
+
+        res.json({
+            success: true,
+            empleado_id: empleadoId,
+            dispositivos: resultado.rows,
+            total: resultado.rows.length
+        });
+
+    } catch (error) {
+        console.error('❌ [movilSync] Error verificando dispositivos:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error al verificar dispositivos del empleado'
         });
     }
 };

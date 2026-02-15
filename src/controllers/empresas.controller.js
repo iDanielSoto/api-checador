@@ -237,3 +237,47 @@ export async function deleteEmpresa(req, res) {
         });
     }
 }
+
+/**
+ * GET /api/empresas/public/:id
+ * Obtiene información básica de una empresa por ID (público)
+ */
+export async function getEmpresaPublicaById(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            SELECT
+                e.id,
+                e.nombre,
+                e.logo,
+                e.es_activo,
+                c.idioma,
+                c.zona_horaria,
+                c.formato_fecha,
+                c.formato_hora
+            FROM empresas e
+            LEFT JOIN configuraciones c ON c.id = e.configuracion_id
+            WHERE e.id = $1 AND e.es_activo = true
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Empresa no encontrada'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: resultado.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error en getEmpresaPublicaById:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener información de la empresa'
+        });
+    }
+}

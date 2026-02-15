@@ -1,7 +1,9 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { broadcast } from '../utils/sse.js';
+
 const MINUTOS_SEPARACION_TURNOS = 15;
+
 function agruparTurnosConcatenados(turnos) {
     if (!turnos || turnos.length === 0) {
         return [];
@@ -29,6 +31,7 @@ function agruparTurnosConcatenados(turnos) {
     grupos.push(grupoActual);
     return grupos;
 }
+
 function getEntradaSalidaGrupo(grupo) {
     if (!grupo || grupo.length === 0) {
         return { entrada: '00:00', salida: '00:00' };
@@ -38,6 +41,7 @@ function getEntradaSalidaGrupo(grupo) {
         salida: grupo[grupo.length - 1].salida
     };
 }
+
 /**
  * Identifica el bloque de horario correspondiente a la hora actual
  */
@@ -56,6 +60,7 @@ function identificarBloqueHorario(gruposTurnos, horaActual, tolerancia) {
     }
     return null;
 }
+
 /**
  * Verifica si un bloque ya tiene entrada y salida registradas
  */
@@ -72,6 +77,7 @@ function bloqueCompletado(registrosHoy, bloque) {
     console.log(`[bloqueCompletado] Bloque ${bloque.entrada}-${bloque.salida}: registros=${totalRegistros}`);
     return totalRegistros >= 2;
 }
+
 function calcularEstadoEntrada(turno, horaActual, tolerancia) {
     const [horaEntrada, minEntrada] = turno.entrada.split(':').map(Number);
     const minEntradaTurno = horaEntrada * 60 + minEntrada;
@@ -92,6 +98,7 @@ function calcularEstadoEntrada(turno, horaActual, tolerancia) {
     }
     return 'falta';
 }
+
 function calcularEstadoSalida(turno, horaActual, tolerancia) {
     const minutosTolerancia = tolerancia.aplica_tolerancia_salida
         ? (tolerancia.minutos_retardo || 10)
@@ -107,6 +114,7 @@ function calcularEstadoSalida(turno, horaActual, tolerancia) {
     }
     return 'salida_puntual';
 }
+
 function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEntrada, totalRegistrosHoy = 0) {
     try {
         if (!configuracionHorario) {
@@ -160,6 +168,7 @@ function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEnt
         return esEntrada ? 'puntual' : 'salida_puntual';
     }
 }
+
 export async function registrarAsistencia(req, res) {
     try {
         const {
@@ -333,6 +342,7 @@ export async function registrarAsistencia(req, res) {
         });
     }
 }
+
 export async function getAsistencias(req, res) {
     try {
         const {
@@ -403,6 +413,7 @@ export async function getAsistencias(req, res) {
         });
     }
 }
+
 export async function getAsistenciasEmpleado(req, res) {
     try {
         const { empleadoId } = req.params;
@@ -458,6 +469,7 @@ export async function getAsistenciasEmpleado(req, res) {
         });
     }
 }
+
 export async function getAsistenciasHoy(req, res) {
     try {
         const { departamento_id } = req.query;

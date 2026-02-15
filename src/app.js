@@ -1,5 +1,7 @@
+import 'express-async-errors'; // Importar al inicio
 import express from 'express';
 import cors from 'cors';
+import { errorHandler } from './middleware/error.middleware.js'; // Importar middleware de errores
 
 // Rutas
 import authRoutes from './routes/auth.routes.js';
@@ -74,5 +76,8 @@ app.use('/api/dias-festivos', diasFestivosRoutes);
 app.use('/api/avisos', avisosRoutes);
 app.use('/api/escritorio/sync', escritorioSyncRoutes);
 app.use('/api/movil', movilSyncRoutes);
+
+// Middleware global de errores (DEBE ir al final)
+app.use(errorHandler);
 
 export default app;

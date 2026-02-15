@@ -67,14 +67,14 @@ export async function getDatosReferencia(req, res) {
 
     // Consultar usuarios_roles
     const usuarios_roles = await pool.query(`
-SELECT
-  ur.id_usuario AS usuario_id,
-  ur.id_rol AS rol_id,
-  r.id_tolerancia AS tolerancia_id,
-  r.jerarquia AS posicion
-FROM usuario_rol ur
-INNER JOIN rol r ON r.id = ur.id_rol
-WHERE ur.es_activo = true
+      SELECT
+        ur.usuario_id,
+        ur.rol_id,
+        r.tolerancia_id,
+        r.posicion
+      FROM usuarios_roles ur
+      INNER JOIN roles r ON r.id = ur.rol_id
+      WHERE ur.es_activo = true
     `);
 
     // Consultar empleados_departamentos

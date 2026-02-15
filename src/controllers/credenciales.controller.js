@@ -369,3 +369,98 @@ function calcularDistanciaEuclidiana(desc1, desc2) {
     }
     return Math.sqrt(suma);
 }
+
+/**
+ * POST /api/credenciales/pin/login
+ * Login de empleado mediante PIN (PÚBLICO)
+ * Retorna datos del empleado si el PIN es correcto
+ */
+export async function loginPorPin(req, res) {
+    try {
+        const { usuario, pin } = req.body;
+        if (!usuario || !pin) {
+            return res.status(400).json({
+                success: false,
+                message: 'Usuario y PIN son requeridos'
+            });
+        }
+        // Obtener credenciales y datos del empleado buscando por usuario o correo
+        const resultado = await pool.query(`
+            SELECT 
+                c.pin, 
+                e.id as empleado_id, 
+                e.rfc, 
+                e.nss, 
+                e.horario_id,
+                u.id as usuario_id, 
+                u.nombre, 
+                u.correo, 
+                u.usuario,
+                u.foto,
+                u.es_empleado
+            FROM credenciales c
+            INNER JOIN empleados e ON e.id = c.empleado_id
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            WHERE (u.usuario = $1 OR u.correo = $1)
+        `, [usuario]);
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario no encontrado o sin credenciales configuradas'
+            });
+        }
+        const datos = resultado.rows[0];
+        // Verificar PIN
+        // NOTA: El PIN en base de datos puede ser numérico o string.
+        // Convertimos ambos a string para comparación segura.
+        const pinRegistrado = String(datos.pin).trim();
+        const pinIngresado = String(pin).trim();
+        if (pinRegistrado !== pinIngresado) {
+            return res.status(401).json({
+                success: false,
+                message: 'PIN incorrecto'
+            });
+        }
+        // Registrar evento de autenticación
+        await registrarEvento({
+            titulo: 'Login por PIN exitoso',
+            descripcion: `${datos.nombre} inició sesión mediante PIN`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.BAJA,
+            empleado_id: datos.empleado_id,
+            detalles: { metodo: 'pin', usuario: datos.usuario }
+        });
+        // Retornar datos del empleado y usuario estructurados
+        res.json({
+            success: true,
+            message: 'Login correcto',
+            data: {
+                // Estructura compatible con lo que espera el frontend
+                usuario: {
+                    id: datos.usuario_id,
+                    usuario: datos.usuario,
+                    correo: datos.correo,
+                    nombre: datos.nombre,
+                    foto: datos.foto,
+                    es_empleado: true, // Si tiene credenciales, es empleado
+                    empleado_id: datos.empleado_id
+                },
+                empleado: {
+                    id: datos.empleado_id,
+                    usuario_id: datos.usuario_id,
+                    nombre: datos.nombre,
+                    rfc: datos.rfc,
+                    nss: datos.nss,
+                    horario_id: datos.horario_id
+                },
+                token: datos.usuario_id // Token simple por ahora, igual que en auth.controller
+            }
+        });
+    } catch (error) {
+        console.error('Error en loginPorPin:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al iniciar sesión con PIN'
+        });
+    }
+}

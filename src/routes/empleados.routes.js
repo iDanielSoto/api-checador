@@ -14,6 +14,9 @@ import { getAvisosDeEmpleado } from '../controllers/avisos.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { requirePermiso, requirePermisoOrSelf } from '../middleware/permissions.middleware.js';
 
+import { validate } from '../middleware/validate.middleware.js';
+import { updateEmpleadoSchema, asignarDepartamentoSchema } from '../schemas/empleados.schema.js';
+
 const router = Router();
 
 // Todas las rutas requieren autenticación
@@ -26,11 +29,11 @@ router.get('/buscar/nss/:nss', requirePermiso('USUARIO_VER'), buscarPorNSS);
 // CRUD empleados
 router.get('/', requirePermiso('USUARIO_VER'), getEmpleados);
 router.get('/:id', requirePermisoOrSelf('id', 'USUARIO_VER'), getEmpleadoById);
-router.put('/:id', requirePermiso('USUARIO_MODIFICAR'), updateEmpleado);
+router.put('/:id', validate(updateEmpleadoSchema), requirePermiso('USUARIO_MODIFICAR'), updateEmpleado);
 
 // Gestión de departamentos
 router.get('/:id/departamentos', requirePermisoOrSelf('id', 'DEPARTAMENTO_VER'), getDepartamentosDeEmpleado);
-router.post('/:id/departamentos', requirePermiso('DEPARTAMENTO_ASIGNAR'), asignarDepartamento);
+router.post('/:id/departamentos', validate(asignarDepartamentoSchema), requirePermiso('DEPARTAMENTO_ASIGNAR'), asignarDepartamento);
 router.delete('/:id/departamentos/:deptoId', requirePermiso('DEPARTAMENTO_ASIGNAR'), removerDepartamento);
 
 // Obtener horario de empleado

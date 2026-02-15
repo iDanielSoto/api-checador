@@ -29,4 +29,7 @@ router.post('/sync/asistencias', movilSyncController.sincronizarAsistencias);
 // POST /api/movil/sync/sesiones
 router.post('/sync/sesiones', movilSyncController.sincronizarSesiones);
 
+// GET /api/movil/sync/dispositivos/:empleadoId (Público)
+router.get('/sync/dispositivos/:empleadoId', movilSyncController.verificarDispositivosEmpleado);
+
 export default router;

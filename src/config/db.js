@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 const { Pool } = pkg;
 dotenv.config();
 
+import logger from '../utils/logger.js';
 
 // Configura la conexión a PostgreSQL
 export const pool = new Pool({
@@ -15,7 +16,7 @@ export const pool = new Pool({
 
 // Verificación de conexión
 pool.connect()
-    .then(() => console.log('✅ Conectado a la base de datos PostgreSQL'))
-    .catch(err => console.error('❌ Error conectando a la base de datos:', err));
+    .then(() => logger.info('✅ Conectado a la base de datos PostgreSQL'))
+    .catch(err => logger.error('❌ Error conectando a la base de datos:', err));
 
 export default pool;

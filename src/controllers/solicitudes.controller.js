@@ -167,6 +167,34 @@ export async function createSolicitud(req, res) {
             });
         }
 
+
+        // Validar empresa_id
+        let empresaIdFinal = empresa_id;
+
+        // Si no viene o es el placeholder EMA00000, buscar una válida
+        if (!empresaIdFinal || empresaIdFinal === 'EMA00000') {
+            const empresaDefault = await pool.query('SELECT id FROM empresas LIMIT 1');
+            if (empresaDefault.rows.length > 0) {
+                empresaIdFinal = empresaDefault.rows[0].id;
+            } else {
+                // Si no hay empresas, no podemos crear solicitud (FK error)
+                return res.status(400).json({
+                    success: false,
+                    message: 'No hay empresas registradas en el sistema'
+                });
+            }
+        } else {
+            // Verificar si la empresa dada existe
+            const empresaExiste = await pool.query('SELECT id FROM empresas WHERE id = $1', [empresaIdFinal]);
+            if (empresaExiste.rows.length === 0) {
+                // Si la ID dada no existe, usar default
+                const empresaDefault = await pool.query('SELECT id FROM empresas LIMIT 1');
+                if (empresaDefault.rows.length > 0) {
+                    empresaIdFinal = empresaDefault.rows[0].id;
+                }
+            }
+        }
+
         if (macString) {
             const existente = await pool.query(
                 "SELECT id FROM solicitudes WHERE mac = $1 AND estado = 'pendiente'",
@@ -190,7 +218,7 @@ export async function createSolicitud(req, res) {
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, $12)
             RETURNING *
-        `, [id, tipo, nombre, descripcion, correo, ipString, macString, sistema_operativo, token, empresa_id, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
+        `, [id, tipo, nombre, descripcion, correo, ipString, macString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
 
         // Registrar evento
         await registrarEvento({
@@ -578,4 +606,58 @@ export async function streamSolicitudes(req, res) {
     }
 
     addClient(res);
+}
+
+/**
+ * DELETE /api/solicitudes/:id
+ * Cancela una solicitud (cambia estado a rechazado)
+ * Endpoint público para que el usuario pueda cancelar su propia solicitud
+ */
+export async function cancelarSolicitud(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            UPDATE solicitudes SET
+                estado = 'rechazado',
+                fecha_respuesta = CURRENT_TIMESTAMP,
+                observaciones = 'Cancelado por el usuario'
+            WHERE id = $1
+            RETURNING *
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Solicitud no encontrada'
+            });
+        }
+
+        const sol = resultado.rows[0];
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: `Solicitud cancelada por usuario`,
+            descripcion: `Solicitud ${sol.nombre} cancelada por el usuario`,
+            tipo_evento: TIPOS_EVENTO.SOLICITUD,
+            prioridad: PRIORIDADES.BAJA,
+            detalles: { solicitud_id: id, tipo: sol.tipo }
+        });
+
+        // Notificar a clientes SSE
+        broadcast('solicitud-actualizada', { id, estado: 'rechazado', tipo: sol.tipo });
+
+        res.json({
+            success: true,
+            message: 'Solicitud cancelada correctamente',
+            data: sol
+        });
+
+    } catch (error) {
+        console.error('Error en cancelarSolicitud:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al cancelar solicitud'
+        });
+    }
 }

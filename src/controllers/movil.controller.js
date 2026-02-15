@@ -112,6 +112,20 @@ export async function createMovil(req, res) {
             mac
         } = req.body;
 
+        if (ip && ip.length > 45) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección IP no debe exceder los 45 caracteres'
+            });
+        }
+
+        if (mac && mac.length > 17) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección MAC no debe exceder los 17 caracteres'
+            });
+        }
+
         if (!empleado_id) {
             return res.status(400).json({
                 success: false,
@@ -188,6 +202,20 @@ export async function updateMovil(req, res) {
     try {
         const { id } = req.params;
         const { sistema_operativo, es_root, es_activo, ip, mac } = req.body;
+
+        if (ip && ip.length > 45) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección IP no debe exceder los 45 caracteres'
+            });
+        }
+
+        if (mac && mac.length > 17) {
+            return res.status(400).json({
+                success: false,
+                message: 'La dirección MAC no debe exceder los 17 caracteres'
+            });
+        }
 
         const resultado = await pool.query(`
             UPDATE movil SET

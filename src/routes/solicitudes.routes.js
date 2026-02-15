@@ -8,7 +8,8 @@ import {
     rechazarSolicitud,
     verificarSolicitud,
     actualizarAPendiente,
-    streamSolicitudes
+    streamSolicitudes,
+    cancelarSolicitud
 } from '../controllers/solicitudes.controller.js';
 import { verificarAutenticacion, autenticacionOpcional } from '../middleware/auth.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
@@ -20,6 +21,7 @@ router.get('/stream', streamSolicitudes);
 
 // Rutas públicas (dispositivos sin autenticación)
 router.post('/', createSolicitud);  // Crear solicitud desde dispositivo
+router.delete('/:id', cancelarSolicitud);  // Cancelar solicitud por el usuario
 router.get('/verificar/:token', verificarSolicitud);  // Verificar estado por token
 router.patch('/:id/pendiente', actualizarAPendiente);  // Reabrir solicitud rechazada
 
