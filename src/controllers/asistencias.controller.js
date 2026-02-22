@@ -311,10 +311,10 @@ export async function registrarAsistencia(req, res) {
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         const ubicacionArray = ubicacion ? `{${ubicacion.join(',')} } ` : null;
         const resultado = await pool.query(`
-            INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo)
-            VALUES($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id)
+            VALUES($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
-    `, [id, estado, dispositivo_origen, ubicacionArray, empleado_id, departamento_id, tipoAsistencia]);
+    `, [id, estado, dispositivo_origen, ubicacionArray, empleado_id, departamento_id, tipoAsistencia, req.empresa_id]);
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(`
             INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
@@ -366,9 +366,9 @@ export async function registrarAsistencia(req, res) {
                 const motivoFalta = `Acumulación de ${limiteRetardos} retardos tipo ${isRetardoA ? 'A' : 'B'}`;
 
                 await pool.query(`
-                    INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo)
-                VALUES($1, 'falta', 'sistema', $2, $3, 'sistema')
-                    `, [idFalta, empleado_id, departamento_id]);
+                    INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id)
+                VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4)
+                    `, [idFalta, empleado_id, departamento_id, req.empresa_id]);
 
                 // 3. Registrar el Evento de "Falta Acumulada"
                 const idEventoFalta = await generateId(ID_PREFIXES.EVENTO);
@@ -459,10 +459,10 @@ export async function getAsistencias(req, res) {
             INNER JOIN empleados e ON e.id = a.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN departamentos d ON d.id = a.departamento_id
-            WHERE 1 = 1
+            WHERE a.empresa_id = $1
                     `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
         if (empleado_id) {
             query += ` AND a.empleado_id = $${paramIndex++} `;
             params.push(empleado_id);

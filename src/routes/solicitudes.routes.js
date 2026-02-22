@@ -12,6 +12,7 @@ import {
     cancelarSolicitud
 } from '../controllers/solicitudes.controller.js';
 import { verificarAutenticacion, autenticacionOpcional } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
@@ -25,11 +26,11 @@ router.delete('/:id', cancelarSolicitud);  // Cancelar solicitud por el usuario
 router.get('/verificar/:token', verificarSolicitud);  // Verificar estado por token
 router.patch('/:id/pendiente', actualizarAPendiente);  // Reabrir solicitud rechazada
 
-// Rutas protegidas
-router.get('/', verificarAutenticacion, requirePermiso('DISPOSITIVO_VER'), getSolicitudes);
-router.get('/pendientes', verificarAutenticacion, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), getSolicitudesPendientes);
-router.patch('/:id/aceptar', verificarAutenticacion, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), aceptarSolicitud);
-router.patch('/:id/rechazar', verificarAutenticacion, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), rechazarSolicitud);
-router.get('/:id', verificarAutenticacion, requirePermiso('DISPOSITIVO_VER'), getSolicitudById);
+// Rutas protegidas (requieren autenticación + contexto de empresa)
+router.get('/', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_VER'), getSolicitudes);
+router.get('/pendientes', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), getSolicitudesPendientes);
+router.patch('/:id/aceptar', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), aceptarSolicitud);
+router.patch('/:id/rechazar', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), rechazarSolicitud);
+router.get('/:id', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_VER'), getSolicitudById);
 
 export default router;

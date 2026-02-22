@@ -12,12 +12,14 @@ import {
     removerRol
 } from '../controllers/usuarios.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso, requirePermisoOrSelf } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
-// Todas las rutas requieren autenticación
+// Todas las rutas requieren autenticación y contexto de empresa
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 // CRUD usuarios
 router.get('/', requirePermiso('USUARIO_VER'), getUsuarios);

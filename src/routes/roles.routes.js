@@ -10,12 +10,14 @@ import {
     getUsuariosConRol
 } from '../controllers/roles.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
-// Todas las rutas requieren autenticación
+// Todas las rutas requieren autenticación y contexto de empresa
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 // Catálogo de permisos (antes de :id para evitar conflictos)
 router.get('/permisos/catalogo', requirePermiso('ROL_VER'), getPermisosCatalogo);

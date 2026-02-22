@@ -17,8 +17,9 @@ export async function getAllAvisos(req, res) {
                 u.nombre as remitente_nombre
             FROM avisos a
             LEFT JOIN usuarios u ON u.id = a.creado_por
+            WHERE a.empresa_id = $1
             ORDER BY a.fecha_registro DESC
-        `);
+        `, [req.empresa_id]);
 
         // Para cada aviso no global, obtenemos los empleados asignados
         const avisos = await Promise.all(resultado.rows.map(async (aviso) => {
@@ -63,9 +64,9 @@ export async function getGlobalAvisos(req, res) {
                 u.nombre as remitente_nombre
             FROM avisos a
             LEFT JOIN usuarios u ON u.id = a.creado_por
-            WHERE a.es_global = true 
+            WHERE a.es_global = true AND a.empresa_id = $1
             ORDER BY a.fecha_registro DESC
-        `);
+        `, [req.empresa_id]);
 
         res.json({
             success: true,
@@ -99,9 +100,9 @@ export async function getAvisosDeEmpleado(req, res) {
             FROM avisos a
             INNER JOIN avisos_empleados ae ON ae.aviso_id = a.id
             LEFT JOIN usuarios u ON u.id = a.creado_por
-            WHERE ae.empleado_id = $1
+            WHERE ae.empleado_id = $1 AND a.empresa_id = $2
             ORDER BY ae.fecha_registro DESC
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         res.json({
             success: true,
@@ -133,10 +134,10 @@ export async function createAviso(req, res) {
         const id = await generateId(ID_PREFIXES.AVISO);
 
         const insertAviso = await client.query(`
-            INSERT INTO avisos (id, titulo, contenido, es_global, creado_por)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO avisos (id, titulo, contenido, es_global, creado_por, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id, titulo, contenido, es_global, fecha_registro, creado_por
-        `, [id, titulo, contenido, es_global, creado_por]);
+        `, [id, titulo, contenido, es_global, creado_por, req.empresa_id]);
 
         const aviso = insertAviso.rows[0];
 
@@ -225,9 +226,9 @@ export async function updateAviso(req, res) {
         const updateAviso = await client.query(`
             UPDATE avisos 
             SET titulo = $1, contenido = $2, es_global = $3
-            WHERE id = $4
+            WHERE id = $4 AND empresa_id = $5
             RETURNING id, titulo, contenido, es_global, fecha_registro
-        `, [titulo, contenido, es_global, id]);
+        `, [titulo, contenido, es_global, id, req.empresa_id]);
 
         if (updateAviso.rowCount === 0) {
             await client.query('ROLLBACK');
@@ -301,7 +302,7 @@ export async function deleteAviso(req, res) {
         await client.query('DELETE FROM avisos_empleados WHERE aviso_id = $1', [id]);
 
         // Eliminar el aviso
-        const result = await client.query('DELETE FROM avisos WHERE id = $1', [id]);
+        const result = await client.query('DELETE FROM avisos WHERE id = $1 AND empresa_id = $2 RETURNING id', [id, req.empresa_id]);
 
         if (result.rowCount === 0) {
             await client.query('ROLLBACK');

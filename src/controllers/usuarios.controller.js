@@ -31,10 +31,10 @@ export async function getUsuarios(req, res) {
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
             LEFT JOIN empresas emp ON emp.id = u.empresa_id
-            WHERE 1=1
+            WHERE u.empresa_id = $1
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (estado) {
             query += ` AND u.estado_cuenta = $${paramIndex++}`;
@@ -58,9 +58,9 @@ export async function getUsuarios(req, res) {
         const resultado = await pool.query(query, params);
 
         // Contar total
-        let countQuery = `SELECT COUNT(*) FROM usuarios u WHERE 1=1`;
-        const countParams = [];
-        let countIndex = 1;
+        let countQuery = `SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id = $1`;
+        const countParams = [req.empresa_id];
+        let countIndex = 2;
 
         if (estado) {
             countQuery += ` AND u.estado_cuenta = $${countIndex++}`;
@@ -219,6 +219,51 @@ export async function createUsuario(req, res) {
         }
 
         await client.query('BEGIN');
+
+        // ==== Validaciones SaaS ====
+        if (empresa_id) {
+            const empresaRes = await client.query('SELECT limite_empleados, fecha_vencimiento, es_activo FROM empresas WHERE id = $1', [empresa_id]);
+            if (empresaRes.rows.length > 0) {
+                const empData = empresaRes.rows[0];
+
+                // Verificar si la empresa está suspendida
+                if (!empData.es_activo) {
+                    await client.query('ROLLBACK');
+                    return res.status(403).json({
+                        success: false,
+                        message: 'La instancia de esta empresa se encuentra suspendida.'
+                    });
+                }
+
+                // Verificar vencimiento de licencia
+                if (empData.fecha_vencimiento && new Date(empData.fecha_vencimiento) < new Date()) {
+                    await client.query('ROLLBACK');
+                    return res.status(403).json({
+                        success: false,
+                        message: 'La licencia SaaS para esta empresa ha expirado.'
+                    });
+                }
+
+                // Verificar límite de empleados solo si el usuario a crear es empleado
+                if (es_empleado && empData.limite_empleados !== null) {
+                    const conteoRes = await client.query(`
+                        SELECT COUNT(*) as total 
+                        FROM usuarios u
+                        INNER JOIN empleados e ON e.usuario_id = u.id
+                        WHERE u.empresa_id = $1 AND u.estado_cuenta = 'activo'
+                    `, [empresa_id]);
+
+                    if (parseInt(conteoRes.rows[0].total) >= empData.limite_empleados) {
+                        await client.query('ROLLBACK');
+                        return res.status(403).json({
+                            success: false,
+                            message: `Se ha alcanzado el límite máximo de ${empData.limite_empleados} empleados permitido por su plan.`
+                        });
+                    }
+                }
+            }
+        }
+        // ==== Fin Validaciones SaaS ====
 
         // Generar ID y hash
         const id = await generateId(ID_PREFIXES.USUARIO);

@@ -7,11 +7,13 @@ import {
     registrarAsistenciaManual
 } from '../controllers/asistencias.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso, requirePermisoOrSelf } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 // Rutas específzicas primero
 router.get('/hoy', requirePermiso('REGISTRO_VER'), getAsistenciasHoy);

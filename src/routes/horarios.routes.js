@@ -9,11 +9,13 @@ import {
     asignarHorario
 } from '../controllers/horarios.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 router.get('/', requirePermiso('HORARIO_VER'), getHorarios);
 router.get('/:id', requirePermiso('HORARIO_VER'), getHorarioById);

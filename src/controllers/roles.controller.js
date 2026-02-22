@@ -30,12 +30,16 @@ export async function getRoles(req, res) {
             LEFT JOIN tolerancias t ON t.id = r.tolerancia_id
         `;
 
-        const params = [];
+        const params = [req.empresa_id];
+        let paramIndex = 2;
         if (es_activo !== undefined && es_activo !== 'all') {
-            query += ` WHERE r.es_activo = $1`;
+            query += ` WHERE r.empresa_id = $1 AND r.es_activo = $${paramIndex++}`;
             params.push(es_activo === 'true');
-        } else if (es_activo !== 'all') {
-            query += ` WHERE r.es_activo = true`;
+        } else {
+            query += ` WHERE r.empresa_id = $1`;
+            if (es_activo !== 'all') {
+                query += ` AND r.es_activo = true`;
+            }
         }
 
         query += ` ORDER BY r.posicion ASC`;
@@ -85,8 +89,8 @@ export async function getRolById(req, res) {
                 t.nombre as tolerancia_nombre
             FROM roles r
             LEFT JOIN tolerancias t ON t.id = r.tolerancia_id
-            WHERE r.id = $1
-        `, [id]);
+            WHERE r.id = $1 AND r.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -154,10 +158,10 @@ export async function createRol(req, res) {
         const id = await generateId(ID_PREFIXES.ROL);
 
         const resultado = await pool.query(`
-            INSERT INTO roles (id, nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id, color)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO roles (id, nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id, color, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
-        `, [id, nombre, descripcion, posicion, permisos_bitwise.toString(), es_admin, es_empleado, tolerancia_id, color]);
+        `, [id, nombre, descripcion, posicion, permisos_bitwise.toString(), es_admin, es_empleado, tolerancia_id, color, req.empresa_id]);
 
         // Registrar evento
         await registrarEvento({
@@ -208,7 +212,7 @@ export async function updateRol(req, res) {
         } = req.body;
 
         // Obtener rol actual para auditoría
-        const rolActual = await client.query('SELECT * FROM roles WHERE id = $1', [id]);
+        const rolActual = await client.query('SELECT * FROM roles WHERE id = $1 AND empresa_id = $2', [id, req.empresa_id]);
         if (rolActual.rows.length === 0) {
             return res.status(404).json({
                 success: false,
@@ -253,9 +257,9 @@ export async function updateRol(req, res) {
                 es_empleado = COALESCE($6, es_empleado),
                 tolerancia_id = COALESCE($7, tolerancia_id),
                 color = COALESCE($8, color)
-            WHERE id = $9
+            WHERE id = $9 AND empresa_id = $10
             RETURNING *
-        `, [nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id, color, id]);
+        `, [nombre, descripcion, posicion, permisos_bitwise, es_admin, es_empleado, tolerancia_id, color, id, req.empresa_id]);
 
         await client.query('COMMIT');
 
@@ -299,8 +303,8 @@ export async function deleteRol(req, res) {
         const { id } = req.params;
 
         const resultado = await pool.query(`
-            UPDATE roles SET es_activo = false WHERE id = $1 RETURNING id, nombre
-        `, [id]);
+            UPDATE roles SET es_activo = false WHERE id = $1 AND empresa_id = $2 RETURNING id, nombre
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -349,9 +353,9 @@ export async function reactivarRol(req, res) {
 
         const resultado = await pool.query(`
             UPDATE roles SET es_activo = true
-            WHERE id = $1 AND es_activo = false
+            WHERE id = $1 AND es_activo = false AND empresa_id = $2
             RETURNING id, nombre
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -456,9 +460,9 @@ export async function getUsuariosConRol(req, res) {
                 ur.fecha_registro as fecha_asignacion
             FROM usuarios u
             INNER JOIN usuarios_roles ur ON ur.usuario_id = u.id
-            WHERE ur.rol_id = $1 AND ur.es_activo = true
+            WHERE ur.rol_id = $1 AND ur.es_activo = true AND u.empresa_id = $2
             ORDER BY u.nombre ASC
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         res.json({
             success: true,

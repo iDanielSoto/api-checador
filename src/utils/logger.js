@@ -1,5 +1,8 @@
 import winston from 'winston';
 import dotenv from 'dotenv';
+import { pool } from '../config/db.js';
+import { generateId, ID_PREFIXES } from './idGenerator.js';
+
 dotenv.config();
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
@@ -32,6 +35,44 @@ if (process.env.NODE_ENV !== 'production') {
             logFormat
         ),
     }));
+}
+
+export const LOG_LEVELS = {
+    INFO: 'info',
+    WARN: 'warn',
+    ERROR: 'error',
+    CRITICAL: 'critical'
+};
+
+/**
+ * Guarda un registro de evento en la tabla global del sistema (system_logs).
+ * Retorna true si tuvo éxito o false si falló para no detener la ejecución principal.
+ */
+export async function logSystemEvent({ nivel = LOG_LEVELS.INFO, mensaje, contexto = null, ruta = null, empresa_id = null }) {
+    try {
+        if (!mensaje || mensaje.trim() === '') {
+            return false;
+        }
+
+        const logId = await generateId(ID_PREFIXES.LOG);
+
+        await pool.query(`
+            INSERT INTO system_logs (id, nivel, mensaje, contexto, ruta, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        `, [
+            logId,
+            nivel,
+            mensaje.substring(0, 1000),
+            contexto ? JSON.stringify(contexto) : null,
+            ruta ? ruta.substring(0, 255) : null,
+            empresa_id
+        ]);
+
+        return true;
+    } catch (err) {
+        console.error('CRITICAL: Falló el logger de Base de Datos:', err);
+        return false;
+    }
 }
 
 export default logger;

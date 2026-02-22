@@ -25,10 +25,10 @@ export async function getMoviles(req, res) {
             FROM movil m
             INNER JOIN empleados e ON e.id = m.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE 1=1
+            WHERE u.empresa_id = $1
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (empleado_id) {
             query += ` AND m.empleado_id = $${paramIndex++}`;
@@ -74,8 +74,8 @@ export async function getMovilById(req, res) {
             FROM movil m
             INNER JOIN empleados e ON e.id = m.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE m.id = $1
-        `, [id]);
+            WHERE m.id = $1 AND u.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -133,17 +133,59 @@ export async function createMovil(req, res) {
             });
         }
 
-        // Verificar que el empleado existe
-        const empleado = await pool.query(
-            'SELECT id FROM empleados WHERE id = $1',
-            [empleado_id]
-        );
+        // Verificar que el empleado existe y traer su empresa_id
+        const empleado = await pool.query(`
+            SELECT e.id, u.empresa_id 
+            FROM empleados e 
+            INNER JOIN usuarios u ON e.usuario_id = u.id
+            WHERE e.id = $1
+        `, [empleado_id]);
 
         if (empleado.rows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Empleado no encontrado'
             });
+        }
+
+        // Obtener la empresa del empleado para validaciones SaaS
+        const empresaId = empleado.rows[0].empresa_id;
+
+        if (empresaId) {
+            const empresaRes = await pool.query('SELECT limite_dispositivos, fecha_vencimiento, es_activo FROM empresas WHERE id = $1', [empresaId]);
+            if (empresaRes.rows.length > 0) {
+                const empData = empresaRes.rows[0];
+
+                if (!empData.es_activo) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'La instancia de esta empresa se encuentra suspendida.'
+                    });
+                }
+
+                if (empData.fecha_vencimiento && new Date(empData.fecha_vencimiento) < new Date()) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'La licencia SaaS para esta empresa ha expirado.'
+                    });
+                }
+
+                if (empData.limite_dispositivos !== null) {
+                    const conteoRes = await pool.query(`
+                        SELECT 
+                            (SELECT COUNT(*) FROM movil m INNER JOIN empleados em ON m.empleado_id = em.id INNER JOIN usuarios u ON em.usuario_id = u.id WHERE u.empresa_id = $1) + 
+                            (SELECT COUNT(*) FROM escritorio e INNER JOIN empleados em ON e.empleado_id = em.id INNER JOIN usuarios u ON em.usuario_id = u.id WHERE u.empresa_id = $1)
+                        as total
+                    `, [empresaId]);
+
+                    if (parseInt(conteoRes.rows[0].total) >= empData.limite_dispositivos) {
+                        return res.status(403).json({
+                            success: false,
+                            message: `Se ha alcanzado el límite máximo de ${empData.limite_dispositivos} dispositivos permitido por su plan.`
+                        });
+                    }
+                }
+            }
         }
 
         // Verificar si ya tiene un dispositivo activo
@@ -224,9 +266,9 @@ export async function updateMovil(req, res) {
                 es_activo = COALESCE($3, es_activo),
                 ip = COALESCE($4, ip),
                 mac = COALESCE($5, mac)
-            WHERE id = $6
+            WHERE id = $6 AND empleado_id IN (SELECT e.id FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE u.empresa_id = $7)
             RETURNING *
-        `, [sistema_operativo, es_root, es_activo, ip, mac, id]);
+        `, [sistema_operativo, es_root, es_activo, ip, mac, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -270,9 +312,9 @@ export async function deleteMovil(req, res) {
 
         const resultado = await pool.query(`
             UPDATE movil SET es_activo = false
-            WHERE id = $1 AND es_activo = true
+            WHERE id = $1 AND es_activo = true AND empleado_id IN (SELECT e.id FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE u.empresa_id = $2)
             RETURNING id
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -315,9 +357,9 @@ export async function reactivarMovil(req, res) {
 
         const resultado = await pool.query(`
             UPDATE movil SET es_activo = true
-            WHERE id = $1 AND es_activo = false
+            WHERE id = $1 AND es_activo = false AND empleado_id IN (SELECT e.id FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE u.empresa_id = $2)
             RETURNING id
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

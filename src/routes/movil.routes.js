@@ -9,11 +9,13 @@ import {
     getMovilEmpleado
 } from '../controllers/movil.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso, requirePermisoOrSelf } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 // Ruta específica primero
 router.get('/empleado/:empleadoId', requirePermisoOrSelf('empleadoId', 'DISPOSITIVO_VER'), getMovilEmpleado);

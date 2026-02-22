@@ -29,10 +29,10 @@ export async function getSolicitudes(req, res) {
                 e.nombre as empresa_nombre
             FROM solicitudes s
             LEFT JOIN empresas e ON e.id = s.empresa_id
-            WHERE 1=1
+            WHERE s.empresa_id = $1
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (tipo) {
             query += ` AND s.tipo = $${paramIndex++}`;
@@ -42,11 +42,6 @@ export async function getSolicitudes(req, res) {
         if (estado) {
             query += ` AND s.estado = $${paramIndex++}`;
             params.push(estado);
-        }
-
-        if (empresa_id) {
-            query += ` AND s.empresa_id = $${paramIndex++}`;
-            params.push(empresa_id);
         }
 
         query += ` ORDER BY s.fecha_registro DESC LIMIT $${paramIndex++} OFFSET $${paramIndex}`;
@@ -80,9 +75,9 @@ export async function getSolicitudesPendientes(req, res) {
                 e.nombre as empresa_nombre
             FROM solicitudes s
             LEFT JOIN empresas e ON e.id = s.empresa_id
-            WHERE s.estado = 'pendiente'
+            WHERE s.estado = 'pendiente' AND s.empresa_id = $1
             ORDER BY s.fecha_registro ASC
-        `);
+        `, [req.empresa_id]);
 
         res.json({
             success: true,
@@ -113,8 +108,8 @@ export async function getSolicitudById(req, res) {
                 e.nombre as empresa_nombre
             FROM solicitudes s
             LEFT JOIN empresas e ON e.id = s.empresa_id
-            WHERE s.id = $1
-        `, [id]);
+            WHERE s.id = $1 AND s.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -327,6 +322,7 @@ export async function aceptarSolicitud(req, res) {
                         ip = $4,
                         sistema_operativo = $5,
                         dispositivos_biometricos = $6,
+                        empresa_id = $7,
                         es_activo = true
                     WHERE id = $1
                 `, [
@@ -335,14 +331,15 @@ export async function aceptarSolicitud(req, res) {
                     sol.descripcion,
                     sol.ip,
                     sol.sistema_operativo,
-                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null
+                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null,
+                    sol.empresa_id
                 ]);
             } else {
                 // Crear el escritorio nuevo
                 dispositivo_id = await generateId(ID_PREFIXES.ESCRITORIO);
                 await client.query(`
-                    INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+                    INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo, empresa_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
                 `, [
                     dispositivo_id,
                     sol.nombre,
@@ -350,7 +347,8 @@ export async function aceptarSolicitud(req, res) {
                     sol.ip,
                     sol.mac,
                     sol.sistema_operativo,
-                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null
+                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null,
+                    sol.empresa_id
                 ]);
             }
 
@@ -383,9 +381,9 @@ export async function aceptarSolicitud(req, res) {
 
             dispositivo_id = await generateId(ID_PREFIXES.MOVIL);
             await client.query(`
-                INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id, ip, mac)
-                VALUES ($1, $2, false, true, $3, $4, $5)
-            `, [dispositivo_id, sol.sistema_operativo, empleado_id, sol.ip, sol.mac]);
+                INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id, ip, mac, empresa_id)
+                VALUES ($1, $2, false, true, $3, $4, $5, $6)
+            `, [dispositivo_id, sol.sistema_operativo, empleado_id, sol.ip, sol.mac, sol.empresa_id]);
         }
 
         await client.query(`
@@ -618,6 +616,11 @@ export async function streamSolicitudes(req, res) {
 
     if (!token) {
         return res.status(401).json({ success: false, message: 'Token requerido' });
+    }
+
+    if (token.startsWith('saas_')) {
+        addClient(res);
+        return;
     }
 
     // Verificar que el token (usuario_id) sea válido

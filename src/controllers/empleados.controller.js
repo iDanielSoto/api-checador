@@ -30,10 +30,10 @@ export async function getEmpleados(req, res) {
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN horarios h ON h.id = e.horario_id
-            WHERE u.estado_cuenta != 'baja'
+            WHERE u.estado_cuenta != 'baja' AND u.empresa_id = $1
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (departamento_id) {
             query += ` AND e.id IN (
@@ -133,8 +133,8 @@ export async function getEmpleadoById(req, res) {
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN horarios h ON h.id = e.horario_id
-            WHERE e.id = $1
-        `, [id]);
+            WHERE e.id = $1 AND u.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -455,8 +455,8 @@ export async function buscarPorRFC(req, res) {
             SELECT e.id, e.rfc, e.nss, e.regimen_laboral, u.nombre, u.correo
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE e.rfc = $1 AND u.estado_cuenta = 'activo'
-        `, [rfc]);
+            WHERE e.rfc = $1 AND u.estado_cuenta = 'activo' AND u.empresa_id = $2
+        `, [rfc, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -491,8 +491,8 @@ export async function buscarPorNSS(req, res) {
             SELECT e.id, e.rfc, e.nss, e.regimen_laboral, u.nombre, u.correo
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE e.nss = $1 AND u.estado_cuenta = 'activo'
-        `, [nss]);
+            WHERE e.nss = $1 AND u.estado_cuenta = 'activo' AND u.empresa_id = $2
+        `, [nss, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

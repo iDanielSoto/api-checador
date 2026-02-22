@@ -31,10 +31,10 @@ export async function getEventos(req, res) {
             FROM eventos e
             LEFT JOIN empleados emp ON emp.id = e.empleado_id
             LEFT JOIN usuarios u ON u.id = emp.usuario_id
-            WHERE 1=1
+            WHERE (u.empresa_id = $1 OR e.empleado_id IS NULL)
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (empleado_id) {
             query += ` AND e.empleado_id = $${paramIndex++}`;
@@ -183,9 +183,10 @@ export async function getEventosRecientes(req, res) {
             FROM eventos e
             LEFT JOIN empleados emp ON emp.id = e.empleado_id
             LEFT JOIN usuarios u ON u.id = emp.usuario_id
+            WHERE (u.empresa_id = $1 OR emp.id IS NULL)
             ORDER BY e.fecha_registro DESC
-            LIMIT $1
-        `, [parseInt(limit)]);
+            LIMIT $2
+        `, [req.empresa_id, parseInt(limit)]);
 
         res.json({
             success: true,

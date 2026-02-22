@@ -22,12 +22,12 @@ export async function getEscritorios(req, res) {
                 e.es_activo,
                 (SELECT COUNT(*) FROM biometrico b WHERE b.escritorio_id = e.id) as biometricos_count
             FROM escritorio e
-            WHERE 1=1
+            WHERE e.empresa_id = $1
         `;
-        const params = [];
+        const params = [req.empresa_id];
 
         if (es_activo !== undefined) {
-            query += ` AND e.es_activo = $1`;
+            query += ` AND e.es_activo = $2`;
             params.push(es_activo === 'true');
         }
 
@@ -58,8 +58,8 @@ export async function getEscritorioById(req, res) {
         const { id } = req.params;
 
         const resultado = await pool.query(`
-            SELECT * FROM escritorio WHERE id = $1
-        `, [id]);
+            SELECT * FROM escritorio WHERE id = $1 AND empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -142,13 +142,53 @@ export async function createEscritorio(req, res) {
             }
         }
 
+        // ==== Validaciones SaaS ====
+        const empresaId = req.empresa_id; // Viene del token / middleware
+        if (empresaId) {
+            const empresaRes = await pool.query('SELECT limite_dispositivos, fecha_vencimiento, es_activo FROM empresas WHERE id = $1', [empresaId]);
+            if (empresaRes.rows.length > 0) {
+                const empData = empresaRes.rows[0];
+
+                if (!empData.es_activo) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'La instancia de esta empresa se encuentra suspendida.'
+                    });
+                }
+
+                if (empData.fecha_vencimiento && new Date(empData.fecha_vencimiento) < new Date()) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'La licencia SaaS para esta empresa ha expirado.'
+                    });
+                }
+
+                if (empData.limite_dispositivos !== null) {
+                    const conteoRes = await pool.query(`
+                        SELECT 
+                            (SELECT COUNT(*) FROM movil m INNER JOIN empleados em ON m.empleado_id = em.id INNER JOIN usuarios u ON em.usuario_id = u.id WHERE u.empresa_id = $1) + 
+                            (SELECT COUNT(*) FROM escritorio e WHERE e.empresa_id = $1)
+                        as total
+                    `, [empresaId]);
+
+                    if (parseInt(conteoRes.rows[0].total) >= empData.limite_dispositivos) {
+                        return res.status(403).json({
+                            success: false,
+                            message: `Se ha alcanzado el límite máximo de ${empData.limite_dispositivos} dispositivos permitido por su plan.`
+                        });
+                    }
+                }
+            }
+        }
+        // ==== Fin Validaciones SaaS ====
+
         const id = await generateId(ID_PREFIXES.ESCRITORIO);
 
         const resultado = await pool.query(`
-            INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+            INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
             RETURNING *
-        `, [id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos ? JSON.stringify(dispositivos_biometricos) : null]);
+        `, [id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos ? JSON.stringify(dispositivos_biometricos) : null, req.empresa_id]);
 
         // Registrar evento
         await registrarEvento({
@@ -217,9 +257,9 @@ export async function updateEscritorio(req, res) {
                 sistema_operativo = COALESCE($5, sistema_operativo),
                 dispositivos_biometricos = COALESCE($6, dispositivos_biometricos),
                 es_activo = COALESCE($7, es_activo)
-            WHERE id = $8
+            WHERE id = $8 AND empresa_id = $9
             RETURNING *
-        `, [nombre, descripcion, ip, mac, sistema_operativo, bioJson, es_activo, id]);
+        `, [nombre, descripcion, ip, mac, sistema_operativo, bioJson, es_activo, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -263,9 +303,9 @@ export async function deleteEscritorio(req, res) {
 
         const resultado = await pool.query(`
             UPDATE escritorio SET es_activo = false
-            WHERE id = $1 AND es_activo = true
+            WHERE id = $1 AND es_activo = true AND empresa_id = $2
             RETURNING id
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -308,9 +348,9 @@ export async function reactivarEscritorio(req, res) {
 
         const resultado = await pool.query(`
             UPDATE escritorio SET es_activo = true
-            WHERE id = $1 AND es_activo = false
+            WHERE id = $1 AND es_activo = false AND empresa_id = $2
             RETURNING id
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

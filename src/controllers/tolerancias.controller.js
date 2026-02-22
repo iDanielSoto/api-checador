@@ -28,12 +28,13 @@ export async function getTolerancias(req, res) {
             LEFT JOIN roles r ON r.tolerancia_id = t.id
         `;
 
-        const params = [];
+        const params = [req.empresa_id];
+        let paramIndex = 2;
         if (es_activo !== undefined) {
-            query += ` WHERE t.es_activo = $1`;
+            query += ` WHERE t.empresa_id = $1 AND t.es_activo = $${paramIndex++}`;
             params.push(es_activo === 'true');
         } else {
-            query += ` WHERE t.es_activo = true`;
+            query += ` WHERE t.empresa_id = $1 AND t.es_activo = true`;
         }
 
         query += ` ORDER BY t.nombre ASC`;
@@ -66,8 +67,8 @@ export async function getToleranciaById(req, res) {
             SELECT t.*, r.id as rol_id, r.nombre as rol_nombre
             FROM tolerancias t
             LEFT JOIN roles r ON r.tolerancia_id = t.id
-            WHERE t.id = $1
-        `, [id]);
+            WHERE t.id = $1 AND t.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -143,15 +144,16 @@ export async function createTolerancia(req, res) {
             INSERT INTO tolerancias (
                 id, nombre, minutos_retardo, minutos_falta,
                 permite_registro_anticipado, minutos_anticipado_max,
-                aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica
+                aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica, empresa_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING *
         `, [
             id, nombre, minutos_retardo, minutos_falta,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            dias_aplica ? JSON.stringify(dias_aplica) : null
+            dias_aplica ? JSON.stringify(dias_aplica) : null,
+            req.empresa_id
         ]);
 
         // 2. Si se especificó un rol, actualizar el rol para que apunte a esta tolerancia
@@ -220,13 +222,13 @@ export async function updateTolerancia(req, res) {
                 aplica_tolerancia_entrada = COALESCE($6, aplica_tolerancia_entrada),
                 aplica_tolerancia_salida = COALESCE($7, aplica_tolerancia_salida),
                 dias_aplica = COALESCE($8, dias_aplica)
-            WHERE id = $9
+            WHERE id = $9 AND empresa_id = $10
             RETURNING *
         `, [
             nombre, minutos_retardo, minutos_falta,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            diasJson, id
+            diasJson, id, req.empresa_id
         ]);
 
         if (resultado.rows.length === 0) {
@@ -286,8 +288,8 @@ export async function deleteTolerancia(req, res) {
         const { id } = req.params;
 
         const resultado = await pool.query(`
-            UPDATE tolerancias SET es_activo = false WHERE id = $1 RETURNING id, nombre
-        `, [id]);
+            UPDATE tolerancias SET es_activo = false WHERE id = $1 AND empresa_id = $2 RETURNING id, nombre
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

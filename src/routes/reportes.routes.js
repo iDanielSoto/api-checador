@@ -9,11 +9,13 @@ import {
     getComparativaDepartamentos
 } from '../controllers/reportes.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 // Estadísticas
 router.get('/estadisticas-globales', requirePermiso('REPORTE_EXPORTAR', 'REGISTRO_VER'), getEstadisticasGlobales);

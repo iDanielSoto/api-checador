@@ -29,6 +29,7 @@ export async function login(req, res) {
                 u.telefono,
                 u.estado_cuenta,
                 u.es_empleado,
+                u.empresa_id,
                 e.id as empleado_id,
                 e.rfc,
                 e.nss
@@ -119,6 +120,7 @@ export async function login(req, res) {
                     foto: usuarioData.foto,
                     telefono: usuarioData.telefono,
                     es_empleado: usuarioData.es_empleado,
+                    empresa_id: usuarioData.empresa_id,
                     empleado_id: usuarioData.empleado_id,
                     rfc: usuarioData.rfc,
                     nss: usuarioData.nss
@@ -142,6 +144,178 @@ export async function login(req, res) {
         res.status(500).json({
             success: false,
             message: 'Error interno del servidor'
+        });
+    }
+}
+
+/**
+ * POST /api/auth/impersonate
+ * Inicia sesión temporalmente como el administrador principal de una empresa cliente (Solo SaaS)
+ */
+export async function impersonarEmpresa(req, res) {
+    try {
+        if (!req.usuario?.esPropietarioSaaS) {
+            return res.status(403).json({ success: false, message: 'Acceso denegado: Solo para Propietarios SaaS' });
+        }
+
+        const { empresa_id } = req.body;
+        if (!empresa_id) {
+            return res.status(400).json({ success: false, message: 'ID de empresa requerido' });
+        }
+
+        // Buscar al administrador principal de esa empresa (el de rol con posición 0 o simplemente el primer admin activo)
+        const resultado = await pool.query(`
+            SELECT DISTINCT u.* 
+            FROM usuarios u
+            INNER JOIN usuarios_roles ur ON ur.usuario_id = u.id AND ur.es_activo = true
+            INNER JOIN roles r ON ur.rol_id = r.id AND r.es_activo = true
+            WHERE u.empresa_id = $1 AND u.estado_cuenta = 'activo' AND r.es_admin = true
+            ORDER BY u.id ASC
+            LIMIT 1
+        `, [empresa_id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'No se encontró un administrador activo para esta empresa' });
+        }
+
+        const usuarioData = resultado.rows[0];
+        delete usuarioData.contraseña;
+
+        // Obtener roles del usuario
+        const rolesResult = await pool.query(`
+            SELECT
+                r.id, r.nombre, r.descripcion, r.permisos_bitwise, r.es_admin, r.es_empleado, r.tolerancia_id, r.posicion
+            FROM roles r
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            WHERE ur.usuario_id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion ASC
+        `, [usuarioData.id]);
+
+        let permisosCombinadosBigInt = BigInt(0);
+        let esAdmin = false;
+
+        for (const rol of rolesResult.rows) {
+            if (rol.permisos_bitwise) permisosCombinadosBigInt |= BigInt(rol.permisos_bitwise);
+            if (rol.es_admin) esAdmin = true;
+        }
+
+        // NO registramos evento de login normal, registramos evento SaaS
+        await registrarEvento({
+            titulo: 'Impersonación SaaS',
+            descripcion: `SaaS Admin ingresó como ${usuarioData.nombre}`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.ALTA,
+            detalles: { admin_original: req.usuario.id, usuario_impersonado: usuarioData.id, empresa_id }
+        });
+
+        res.json({
+            success: true,
+            message: 'Iniciando sesión como cliente',
+            data: {
+                usuario: {
+                    id: usuarioData.id,
+                    usuario: usuarioData.usuario,
+                    correo: usuarioData.correo,
+                    nombre: usuarioData.nombre,
+                    foto: usuarioData.foto,
+                    telefono: usuarioData.telefono,
+                    es_empleado: usuarioData.es_empleado,
+                    empresa_id: usuarioData.empresa_id
+                },
+                roles: rolesResult.rows.map(r => ({
+                    id: r.id, nombre: r.nombre, es_admin: r.es_admin, posicion: r.posicion
+                })),
+                permisos: permisosCombinadosBigInt.toString(),
+                esAdmin,
+                token: usuarioData.id // Token simple por ahora, igual que en login
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en impersonarEmpresa:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor en impersonación' });
+    }
+}
+
+/**
+ * POST /api/auth/login-saas
+ * Inicia sesión exclusivamente para Dueños de la Plataforma (SaaS)
+ */
+export async function loginSaaS(req, res) {
+    try {
+        const { usuario, contraseña } = req.body;
+
+        if (!usuario || !contraseña) {
+            return res.status(400).json({
+                success: false,
+                message: 'Usuario y contraseña son requeridos'
+            });
+        }
+
+        const resultado = await pool.query(`
+            SELECT id, usuario, correo, contraseña, nombre, estado_cuenta 
+            FROM super_administradores 
+            WHERE (usuario = $1 OR correo = $1)
+        `, [usuario]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(401).json({
+                success: false,
+                message: 'Credenciales inválidas o no tiene privilegios de SaaS'
+            });
+        }
+
+        const adminData = resultado.rows[0];
+
+        if (adminData.estado_cuenta !== 'activo') {
+            return res.status(403).json({
+                success: false,
+                message: `Cuenta Maestra ${adminData.estado_cuenta}. Contacte a soporte.`
+            });
+        }
+
+        const contraseñaValida = await bcrypt.compare(contraseña, adminData.contraseña);
+
+        if (!contraseñaValida) {
+            return res.status(401).json({
+                success: false,
+                message: 'Credenciales inválidas'
+            });
+        }
+
+        delete adminData.contraseña;
+
+        res.json({
+            success: true,
+            message: 'Inicio de sesión SaaS exitoso',
+            data: {
+                usuario: {
+                    id: adminData.id,
+                    usuario: adminData.usuario,
+                    correo: adminData.correo,
+                    nombre: adminData.nombre,
+                    // Flags esenciales para el Frontend Maestro
+                    esPropietarioSaaS: true,
+                    esAdmin: true,
+                    // Mock para compatibilidad con la estructura general
+                    es_empleado: false,
+                    empleado_id: null,
+                    empresa_id: 'MASTER'
+                },
+                roles: [{ nombre: 'Propietario SaaS', es_admin: true, posicion: 0 }],
+                permisos: '9223372036854775807', // Máximo valor BigInt para saltar validaciones en frontend si es necesario
+                esAdmin: true,
+                esPropietarioSaaS: true,
+                // Usamos un prefijo en el token/ID para identificar que es una sesión SaaS
+                token: 'saas_' + adminData.id
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en loginSaaS:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error interno del servidor en portal SaaS'
         });
     }
 }
@@ -201,11 +375,14 @@ export async function verificarSesion(req, res) {
                     nombre: req.usuario.nombre,
                     foto: req.usuario.foto,
                     es_empleado: req.usuario.es_empleado,
-                    empleado_id: req.usuario.empleado_id
+                    empleado_id: req.usuario.empleado_id,
+                    empresa_id: req.usuario.empresa_id,
+                    esPropietarioSaaS: req.usuario.esPropietarioSaaS
                 },
                 roles: req.usuario.roles,
                 permisos: req.usuario.permisos,
-                esAdmin: req.usuario.esAdmin
+                esAdmin: req.usuario.esAdmin,
+                esPropietarioSaaS: req.usuario.esPropietarioSaaS
             }
         });
     } catch (error) {
@@ -328,6 +505,7 @@ export async function loginBiometrico(req, res) {
                 u.telefono,
                 u.estado_cuenta,
                 u.es_empleado,
+                u.empresa_id,
                 e.id as empleado_id,
                 e.rfc,
                 e.nss,
@@ -391,6 +569,7 @@ export async function loginBiometrico(req, res) {
                     foto: usuarioData.foto,
                     telefono: usuarioData.telefono,
                     es_empleado: true,  // Siempre true porque viene de tabla empleados
+                    empresa_id: usuarioData.empresa_id,
                     empleado_id: usuarioData.empleado_id,
                     rfc: usuarioData.rfc,
                     nss: usuarioData.nss,

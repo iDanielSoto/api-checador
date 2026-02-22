@@ -23,10 +23,10 @@ export async function getHorarios(req, res) {
             FROM horarios h
             LEFT JOIN empleados e ON e.horario_id = h.id
             LEFT JOIN usuarios u ON u.id = e.usuario_id
-            WHERE 1=1
+            WHERE h.empresa_id = $1
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (es_activo !== undefined) {
             query += ` AND h.es_activo = $${paramIndex++}`;
@@ -76,8 +76,8 @@ export async function getHorarioById(req, res) {
             FROM horarios h
             LEFT JOIN empleados e ON e.horario_id = h.id
             LEFT JOIN usuarios u ON u.id = e.usuario_id
-            WHERE h.id = $1
-        `, [id]);
+            WHERE h.id = $1 AND h.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -136,10 +136,10 @@ export async function createHorario(req, res) {
 
         // Crear el horario
         const horarioResult = await client.query(`
-            INSERT INTO horarios (id, fecha_inicio, fecha_fin, configuracion, es_activo)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO horarios (id, fecha_inicio, fecha_fin, configuracion, es_activo, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
-        `, [id, fecha_inicio, fecha_fin, JSON.stringify(configuracion), es_activo]);
+        `, [id, fecha_inicio, fecha_fin, JSON.stringify(configuracion), es_activo, req.empresa_id]);
 
         // Asignar el horario al empleado
         await client.query(`
@@ -209,9 +209,9 @@ export async function updateHorario(req, res) {
                 fecha_fin = $2,
                 configuracion = COALESCE($3, configuracion),
                 es_activo = COALESCE($4, es_activo)
-            WHERE id = $5
+            WHERE id = $5 AND empresa_id = $6
             RETURNING *
-        `, [fecha_inicio, fecha_fin, configJson, es_activo, id]);
+        `, [fecha_inicio, fecha_fin, configJson, es_activo, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -301,9 +301,9 @@ export async function deleteHorario(req, res) {
         // Desactivar el horario
         const resultado = await client.query(`
             UPDATE horarios SET es_activo = false
-            WHERE id = $1
+            WHERE id = $1 AND empresa_id = $2
             RETURNING id
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -352,9 +352,9 @@ export async function reactivarHorario(req, res) {
 
         const resultado = await pool.query(`
             UPDATE horarios SET es_activo = true
-            WHERE id = $1 AND es_activo = false
+            WHERE id = $1 AND es_activo = false AND empresa_id = $2
             RETURNING id
-        `, [id]);
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

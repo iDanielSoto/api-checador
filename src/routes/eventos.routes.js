@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { getEventos, getEventoById, createEvento, getEventosRecientes, getStatsEventos } from '../controllers/eventos.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 router.get('/recientes', requirePermiso('REGISTRO_VER'), getEventosRecientes);
 router.get('/stats', requirePermiso('REGISTRO_VER'), getStatsEventos);

@@ -12,6 +12,7 @@ import {
 } from '../controllers/empleados.controller.js';
 import { getAvisosDeEmpleado } from '../controllers/avisos.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
+import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso, requirePermisoOrSelf } from '../middleware/permissions.middleware.js';
 
 import { validate } from '../middleware/validate.middleware.js';
@@ -19,8 +20,9 @@ import { updateEmpleadoSchema, asignarDepartamentoSchema } from '../schemas/empl
 
 const router = Router();
 
-// Todas las rutas requieren autenticación
+// Todas las rutas requieren autenticación y contexto de empresa
 router.use(verificarAutenticacion);
+router.use(verificarEmpresa);
 
 // Búsquedas específicas (antes de :id para evitar conflictos)
 router.get('/buscar/rfc/:rfc', requirePermiso('USUARIO_VER'), buscarPorRFC);

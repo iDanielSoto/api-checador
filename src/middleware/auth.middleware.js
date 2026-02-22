@@ -34,7 +34,39 @@ export async function verificarAutenticacion(req, res, next) {
             });
         }
 
-        // Buscar usuario por ID
+        // ==========================================
+        // Detección de Propietario SaaS (Dueño del Sistema)
+        // ==========================================
+        if (token.startsWith('saas_')) {
+            const adminId = token.substring(5); // Remover 'saas_'
+            const resSaaS = await pool.query(`
+                SELECT id, usuario, correo, nombre, estado_cuenta 
+                FROM super_administradores 
+                WHERE id = $1 AND estado_cuenta = 'activo'
+            `, [adminId]);
+
+            if (resSaaS.rows.length === 0) {
+                return res.status(401).json({ success: false, message: 'Sesión SaaS inválida o no encontrada' });
+            }
+
+            req.usuario = {
+                ...resSaaS.rows[0],
+                esPropietarioSaaS: true,
+                esAdmin: true,
+                es_empleado: false,
+                empleado_id: null,
+                empresa_id: 'MASTER',
+                roles: [{ nombre: 'Propietario SaaS', es_admin: true, posicion: 0 }],
+                permisos: '9223372036854775807',
+                permisosBigInt: BigInt('9223372036854775807')
+            };
+
+            return next();
+        }
+
+        // ==========================================
+        // Detección de Usuario Regular (Multi-Tenant)
+        // ==========================================
         const resultado = await pool.query(`
             SELECT
                 u.id,
@@ -78,8 +110,6 @@ export async function verificarAutenticacion(req, res, next) {
         let permisosCombinadosBigInt = BigInt(0);
         let esAdmin = false;
 
-
-
         for (const rol of rolesResult.rows) {
             if (rol.permisos_bitwise) {
                 permisosCombinadosBigInt |= BigInt(rol.permisos_bitwise);
@@ -89,11 +119,10 @@ export async function verificarAutenticacion(req, res, next) {
             }
         }
 
-
-
         // Adjuntar información del usuario al request
         req.usuario = {
             ...resultado.rows[0],
+            esPropietarioSaaS: false,
             roles: rolesResult.rows,
             permisos: permisosCombinadosBigInt.toString(),
             permisosBigInt: permisosCombinadosBigInt,

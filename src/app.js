@@ -23,11 +23,13 @@ import departamentosRoutes from './routes/departamentos.routes.js';
 import credencialesRoutes from './routes/credenciales.routes.js';
 import modulosRoutes from './routes/modulos.routes.js';
 import reportesRoutes from './routes/reportes.routes.js';
+import superadminRoutes from './routes/superadmin.routes.js';
 import streamRoutes from './routes/stream.routes.js';
 import diasFestivosRoutes from './routes/diasFestivos.routes.js';
 import avisosRoutes from './routes/avisos.routes.js';
 import escritorioSyncRoutes from './routes/escritorio.sync.routes.js';
 import movilSyncRoutes from './routes/movil.sync.routes.js';
+import saasRoutes from './routes/saas.routes.js';
 
 const app = express();
 
@@ -71,11 +73,13 @@ app.use('/api/departamentos', departamentosRoutes);
 app.use('/api/credenciales', credencialesRoutes);
 app.use('/api/modulos', modulosRoutes);
 app.use('/api/reportes', reportesRoutes);
+app.use('/api/super-administradores', superadminRoutes);
 app.use('/api/stream', streamRoutes);
 app.use('/api/dias-festivos', diasFestivosRoutes);
 app.use('/api/avisos', avisosRoutes);
 app.use('/api/escritorio/sync', escritorioSyncRoutes);
 app.use('/api/movil', movilSyncRoutes);
+app.use('/api/saas', saasRoutes);
 
 // Middleware global de errores (DEBE ir al final)
 app.use(errorHandler);

@@ -13,6 +13,12 @@ export async function streamEvents(req, res) {
         return res.status(401).json({ success: false, message: 'Token requerido' });
     }
 
+    // Bypass temporal o definitivo para administradores de la red (Tokens de Saas)
+    if (token.startsWith('saas_')) {
+        addClient(res);
+        return;
+    }
+
     // Verify token/user
     try {
         const resultado = await pool.query(

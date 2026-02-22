@@ -1,5 +1,5 @@
 import { pool } from '../config/db.js';
-import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { generateId, generateSecurityKey, ID_PREFIXES } from '../utils/idGenerator.js';
 import { broadcast } from '../utils/sse.js';
 
 /**
@@ -21,7 +21,9 @@ export async function getEmpresas(req, res) {
                 e.fecha_registro,
                 e.configuracion_id,
                 c.idioma,
-                c.zona_horaria
+                c.zona_horaria,
+                (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
+                (SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id = e.id AND u.estado_cuenta = 'activo') as total_usuarios
             FROM empresas e
             LEFT JOIN configuraciones c ON c.id = e.configuracion_id
             WHERE 1=1
@@ -49,6 +51,70 @@ export async function getEmpresas(req, res) {
             success: false,
             message: 'Error al obtener empresas'
         });
+    }
+}
+
+/**
+ * GET /api/empresas/mi-empresa
+ * Devuelve los datos de la empresa del usuario autenticado (disponible para Tenant Admins)
+ */
+export async function getMiEmpresa(req, res) {
+    try {
+        const resultado = await pool.query(`
+            SELECT
+                e.id, e.nombre, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
+                e.configuracion_id,
+                c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora,
+                (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
+                (SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id = e.id AND u.estado_cuenta = 'activo') as total_usuarios
+            FROM empresas e
+            LEFT JOIN configuraciones c ON c.id = e.configuracion_id
+            WHERE e.id = $1
+        `, [req.empresa_id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
+        }
+
+        res.json({ success: true, data: resultado.rows[0] });
+
+    } catch (error) {
+        console.error('Error en getMiEmpresa:', error);
+        res.status(500).json({ success: false, message: 'Error al obtener datos de la empresa' });
+    }
+}
+
+/**
+ * PUT /api/empresas/mi-empresa
+ * Permite al Tenant Admin actualizar su propia empresa (sin necesitar ser SaaS Owner)
+ */
+export async function updateMiEmpresa(req, res) {
+    try {
+        const { nombre, logo, telefono, correo } = req.body;
+
+        if (!nombre?.trim()) {
+            return res.status(400).json({ success: false, message: 'El nombre de la empresa es requerido' });
+        }
+
+        const resultado = await pool.query(`
+            UPDATE empresas SET
+                nombre = $1,
+                logo = $2,
+                telefono = $3,
+                correo = $4
+            WHERE id = $5
+            RETURNING id, nombre, logo, telefono, correo, es_activo
+        `, [nombre.trim(), logo || null, telefono || null, correo || null, req.empresa_id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
+        }
+
+        res.json({ success: true, data: resultado.rows[0], message: 'Empresa actualizada correctamente' });
+
+    } catch (error) {
+        console.error('Error en updateMiEmpresa:', error);
+        res.status(500).json({ success: false, message: 'Error al actualizar la empresa' });
     }
 }
 
@@ -94,7 +160,7 @@ export async function getEmpresaById(req, res) {
 
 /**
  * POST /api/empresas
- * Crea una nueva empresa con su configuración
+ * Aprovisionamiento Completo SaaS: Crea una nueva empresa y a su primer Administrador
  */
 export async function createEmpresa(req, res) {
     const client = await pool.connect();
@@ -105,53 +171,131 @@ export async function createEmpresa(req, res) {
             logo,
             telefono,
             correo,
+            admin_usuario, // Creado especialmente para el SaaS frontend
+            admin_correo,
             // Configuración inicial
             idioma = 'es',
             formato_fecha = 'DD/MM/YYYY',
             formato_hora = '24',
-            zona_horaria = 'America/Mexico_City'
+            zona_horaria = 'America/Mexico_City',
+            // Límites y Licencias
+            limite_empleados = null,
+            limite_dispositivos = null,
+            fecha_vencimiento = null
         } = req.body;
 
-        if (!nombre) {
+        if (!nombre || !admin_usuario || !admin_correo) {
             return res.status(400).json({
                 success: false,
-                message: 'El nombre es requerido'
+                message: 'Faltan campos obligatorios para el aprovisionamiento (Nombre Empresa, Usuario Admin, Correo Admin)'
             });
         }
 
         await client.query('BEGIN');
 
-        // Crear configuración
+        // 1. Validar que el Administrador deseado no exista globalmente
+        const userExists = await client.query('SELECT id FROM usuarios WHERE usuario = $1 OR correo = $2', [admin_usuario, admin_correo]);
+        if (userExists.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: 'El nombre de usuario o correo para el Nuevo Administrador ya está registrado en el sistema.'
+            });
+        }
+
+        // 2. Crear configuración de Tenant
         const configId = await generateId(ID_PREFIXES.CONFIGURACION);
         await client.query(`
             INSERT INTO configuraciones (id, idioma, formato_fecha, formato_hora, zona_horaria)
             VALUES ($1, $2, $3, $4, $5)
         `, [configId, idioma, formato_fecha, formato_hora, zona_horaria]);
 
-        // Crear empresa
+        // 3. Crear empresa pública
         const empresaId = await generateId(ID_PREFIXES.EMPRESA);
-        const resultado = await client.query(`
+        const resultadoEmpresa = await client.query(`
             INSERT INTO empresas (
-                id, nombre, logo, telefono, correo, es_activo, configuracion_id
+                id, nombre, logo, telefono, correo, es_activo, configuracion_id, 
+                limite_empleados, limite_dispositivos, fecha_vencimiento
             )
-            VALUES ($1, $2, $3, $4, $5, true, $6)
+            VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)
             RETURNING *
-        `, [empresaId, nombre, logo, telefono, correo, configId]);
+        `, [
+            empresaId, nombre, logo, telefono, correo, configId,
+            limite_empleados, limite_dispositivos, fecha_vencimiento
+        ]);
+
+        // 4. Crear Credenciales del Primer Administrador de esta empresa
+        const usuarioId = await generateId(ID_PREFIXES.USUARIO);
+        const clave_seguridad = generateSecurityKey();
+
+        const bcrypt = await import('bcrypt');
+        const defaultPassword = '12345678'; // Contraseña temporal por defecto
+        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+
+        await client.query(`
+            INSERT INTO usuarios (
+                id, usuario, contraseña, correo, nombre, estado_cuenta, empresa_id, es_empleado, clave_seguridad
+            )
+            VALUES ($1, $2, $3, $4, $5, 'activo', $6, false, $7)
+        `, [
+            usuarioId,
+            admin_usuario,
+            hashedPassword,
+            admin_correo,
+            'Administrador Principal',
+            empresaId,
+            clave_seguridad
+        ]);
+
+        // 5. Crear roles base propios para la nueva empresa (aislamiento total de Tenant)
+        const rolesBase = [
+            { nombre: 'Empleado', posicion: 1, es_admin: false, es_empleado: true, permisos: '0' },
+            { nombre: 'Administrador', posicion: 0, es_admin: true, es_empleado: false, permisos: '9223372036854775807' },
+        ];
+
+        let rolAdminId = null;
+        for (const rolDef of rolesBase) {
+            const rolId = await generateId(ID_PREFIXES.ROL);
+            await client.query(`
+                INSERT INTO roles (id, nombre, posicion, es_admin, es_empleado, permisos_bitwise, empresa_id, es_activo)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+            `, [rolId, rolDef.nombre, rolDef.posicion, rolDef.es_admin, rolDef.es_empleado, rolDef.permisos, empresaId]);
+            if (rolDef.es_admin) rolAdminId = rolId;
+        }
+
+        // 6. Asignar rol Administrador al nuevo usuario (rol de ESTA empresa)
+        if (rolAdminId) {
+            const urlId = await generateId(ID_PREFIXES.USUARIO_ROL);
+            await client.query(`
+                INSERT INTO usuarios_roles (id, usuario_id, rol_id, es_activo)
+                VALUES ($1, $2, $3, true)
+            `, [urlId, usuarioId, rolAdminId]);
+        }
+
 
         await client.query('COMMIT');
 
+        // Enviar respuesta exitosa con la password en texto plano (una sola vez)
         res.status(201).json({
             success: true,
-            message: 'Empresa creada correctamente',
-            data: resultado.rows[0]
+            message: 'Tenant aprovisionado exitosamente',
+            data: {
+                empresa: resultadoEmpresa.rows[0],
+                admin: {
+                    usuario: admin_usuario,
+                    correo: admin_correo,
+                    password_temporal: defaultPassword
+                }
+            }
         });
 
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('Error en createEmpresa:', error);
+        console.error('Error en createEmpresa (Aprovisionamiento SaaS):', error);
         res.status(500).json({
             success: false,
-            message: 'Error al crear empresa'
+            message: 'Error al aprovisionar la nueva empresa',
+            error: error.message
         });
     } finally {
         client.release();
@@ -165,7 +309,10 @@ export async function createEmpresa(req, res) {
 export async function updateEmpresa(req, res) {
     try {
         const { id } = req.params;
-        const { nombre, logo, es_activo, telefono, correo } = req.body;
+        const {
+            nombre, logo, es_activo, telefono, correo,
+            limite_empleados, limite_dispositivos, fecha_vencimiento
+        } = req.body;
 
         const resultado = await pool.query(`
             UPDATE empresas SET
@@ -173,10 +320,13 @@ export async function updateEmpresa(req, res) {
                 logo     = COALESCE($2, logo),
                 es_activo= COALESCE($3, es_activo),
                 telefono = COALESCE($4, telefono),
-                correo   = COALESCE($5, correo)
-            WHERE id = $6
+                correo   = COALESCE($5, correo),
+                limite_empleados = CASE WHEN $6::text = 'null' THEN NULL ELSE COALESCE($6::integer, limite_empleados) END,
+                limite_dispositivos = CASE WHEN $7::text = 'null' THEN NULL ELSE COALESCE($7::integer, limite_dispositivos) END,
+                fecha_vencimiento = CASE WHEN $8::text = 'null' THEN NULL ELSE COALESCE($8::timestamp, fecha_vencimiento) END
+            WHERE id = $9
             RETURNING *
-        `, [nombre, logo, es_activo, telefono, correo, id]);
+        `, [nombre, logo, es_activo, telefono, correo, limite_empleados, limite_dispositivos, fecha_vencimiento, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

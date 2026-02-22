@@ -32,10 +32,10 @@ export async function getIncidencias(req, res) {
             FROM incidencias i
             INNER JOIN empleados e ON e.id = i.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE 1=1
+            WHERE u.empresa_id = $1
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (empleado_id) {
             query += ` AND i.empleado_id = $${paramIndex++}`;
@@ -97,8 +97,8 @@ export async function getIncidenciaById(req, res) {
             FROM incidencias i
             INNER JOIN empleados e ON e.id = i.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE i.id = $1
-        `, [id]);
+            WHERE i.id = $1 AND u.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -160,10 +160,10 @@ export async function createIncidencia(req, res) {
         const id = await generateId(ID_PREFIXES.INCIDENCIA);
 
         const resultado = await pool.query(`
-            INSERT INTO incidencias (id, empleado_id, tipo, motivo, observaciones, fecha_inicio, fecha_fin, estado)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente')
+            INSERT INTO incidencias (id, empleado_id, tipo, motivo, observaciones, fecha_inicio, fecha_fin, estado, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8)
             RETURNING *
-        `, [id, empleado_id, tipo, motivo, observaciones, fecha_inicio, fecha_fin]);
+        `, [id, empleado_id, tipo, motivo, observaciones, fecha_inicio, fecha_fin, req.empresa_id]);
 
         // Registrar evento
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
@@ -213,9 +213,9 @@ export async function updateIncidencia(req, res) {
                 observaciones = COALESCE($2, observaciones),
                 fecha_inicio = COALESCE($3, fecha_inicio),
                 fecha_fin = COALESCE($4, fecha_fin)
-            WHERE id = $5 AND estado = 'pendiente'
+            WHERE id = $5 AND estado = 'pendiente' AND empresa_id = $6
             RETURNING *
-        `, [motivo, observaciones, fecha_inicio, fecha_fin, id]);
+        `, [motivo, observaciones, fecha_inicio, fecha_fin, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -252,9 +252,9 @@ export async function aprobarIncidencia(req, res) {
             UPDATE incidencias SET
                 estado = 'aprobado',
                 observaciones = COALESCE($1, observaciones)
-            WHERE id = $2 AND estado = 'pendiente'
+            WHERE id = $2 AND estado = 'pendiente' AND empresa_id = $3
             RETURNING *
-        `, [observaciones, id]);
+        `, [observaciones, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -309,9 +309,9 @@ export async function rechazarIncidencia(req, res) {
             UPDATE incidencias SET
                 estado = 'rechazado',
                 observaciones = $1
-            WHERE id = $2 AND estado = 'pendiente'
+            WHERE id = $2 AND estado = 'pendiente' AND empresa_id = $3
             RETURNING *
-        `, [observaciones, id]);
+        `, [observaciones, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -360,14 +360,14 @@ export async function getIncidenciasPendientes(req, res) {
             FROM incidencias i
             INNER JOIN empleados e ON e.id = i.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE i.estado = 'pendiente'
+            WHERE i.estado = 'pendiente' AND u.empresa_id = $1
             ORDER BY i.fecha_inicio ASC
-        `);
+        `, [req.empresa_id]);
 
         res.json({
             success: true,
             data: resultado.rows,
-            total: resultado.rows.length    
+            total: resultado.rows.length
         });
 
     } catch (error) {

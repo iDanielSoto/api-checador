@@ -36,8 +36,8 @@ export async function getEstadisticasGlobales(req, res) {
                 COUNT(*) FILTER (WHERE estado = 'falta') as faltas,
                 COUNT(*) FILTER (WHERE estado IN ('puntual', 'retardo', 'falta')) as total
             FROM asistencias a
-            ${whereAsistencias}
-        `, paramsAsistencias);
+            WHERE a.empresa_id = $1 ${whereAsistencias ? 'AND ' + whereAsistencias.replace('WHERE ', '') : ''}
+        `, [req.empresa_id, ...paramsAsistencias]);
 
         const incidencias = await pool.query(`
             SELECT
@@ -47,9 +47,9 @@ export async function getEstadisticasGlobales(req, res) {
                 COUNT(*) FILTER (WHERE estado = 'rechazado') as rechazadas,
                 COUNT(*) FILTER (WHERE estado = 'pendiente') as pendientes
             FROM incidencias
-            ${whereIncidencias}
+            WHERE empresa_id = $1 ${whereIncidencias ? 'AND ' + whereIncidencias.replace('WHERE ', '') : ''}
             GROUP BY tipo
-        `, paramsIncidencias);
+        `, [req.empresa_id, ...paramsIncidencias]);
 
         res.json({ success: true, data: { asistencias: asistencias.rows[0], incidencias: incidencias.rows } });
 
@@ -104,7 +104,8 @@ export async function getEstadisticasEmpleado(req, res) {
                 COUNT(*) FILTER (WHERE estado = 'retardo') as retardos,
                 COUNT(*) FILTER (WHERE estado = 'falta') as faltas
             FROM asistencias
-            ${whereAsistencias}
+            WHERE empresa_id = (SELECT empresa_id FROM usuarios u INNER JOIN empleados e ON e.usuario_id = u.id WHERE e.id = $1 LIMIT 1)
+            AND ${whereAsistencias.replace('WHERE ', '')}
         `, paramsAsistencias);
 
         const incidencias = await pool.query(`
@@ -210,10 +211,10 @@ export async function getDetalleAsistencias(req, res) {
             FROM asistencias a
             INNER JOIN empleados e ON e.id = a.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE 1=1
+            WHERE a.empresa_id = $1
         `;
-        const params = [];
-        let i = 1;
+        const params = [req.empresa_id];
+        let i = 2;
 
         if (empleado_id) { query += ` AND a.empleado_id = $${i++}`; params.push(empleado_id); }
         if (departamento_id) {
@@ -250,10 +251,10 @@ export async function getDetalleIncidencias(req, res) {
             FROM incidencias i
             INNER JOIN empleados e ON e.id = i.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE 1=1
+            WHERE i.empresa_id = $1
         `;
-        const params = [];
-        let i = 1;
+        const params = [req.empresa_id];
+        let i = 2;
 
         if (empleado_id) { query += ` AND i.empleado_id = $${i++}`; params.push(empleado_id); }
         if (departamento_id) {
@@ -332,10 +333,11 @@ export async function getReporteDesempeno(req, res) {
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN asistencias a ON a.empleado_id = e.id ${whereFechas}
-            WHERE ${whereEmpleados}
+            WHERE u.empresa_id = $${i++} AND ${whereEmpleados}
             GROUP BY e.id, u.nombre, e.rfc
             ORDER BY porcentaje_puntualidad DESC NULLS LAST
         `;
+        params.unshift(req.empresa_id);
 
         const result = await pool.query(query, params);
         res.json({ success: true, data: result.rows });

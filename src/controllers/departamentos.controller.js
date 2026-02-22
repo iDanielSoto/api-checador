@@ -8,11 +8,11 @@ export async function getDepartamentos(req, res) {
         let query = `
             SELECT d.*,
                 (SELECT COUNT(*) FROM empleados_departamentos ed WHERE ed.departamento_id = d.id AND ed.es_activo = true) as empleados_count
-            FROM departamentos d WHERE 1=1
+            FROM departamentos d WHERE d.empresa_id = $1
         `;
-        const params = [];
+        const params = [req.empresa_id];
         if (es_activo !== undefined) {
-            query += ` AND d.es_activo = $1`;
+            query += ` AND d.es_activo = $2`;
             params.push(es_activo === 'true');
         }
         query += ` ORDER BY d.nombre ASC`;
@@ -27,7 +27,7 @@ export async function getDepartamentos(req, res) {
 export async function getDepartamentoById(req, res) {
     try {
         const { id } = req.params;
-        const resultado = await pool.query('SELECT * FROM departamentos WHERE id = $1', [id]);
+        const resultado = await pool.query('SELECT * FROM departamentos WHERE id = $1 AND empresa_id = $2', [id, req.empresa_id]);
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
         }
@@ -53,15 +53,16 @@ export async function createDepartamento(req, res) {
         }
         const id = await generateId(ID_PREFIXES.DEPARTAMENTO);
         const resultado = await pool.query(`
-            INSERT INTO departamentos (id, nombre, descripcion, ubicacion, jefes, color, es_activo)
-            VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING *
+            INSERT INTO departamentos (id, nombre, descripcion, ubicacion, jefes, color, es_activo, empresa_id)
+            VALUES ($1, $2, $3, $4, $5, $6, true, $7) RETURNING *
         `, [
             id,
             nombre,
             descripcion,
             ubicacion || null,
             jefes || null,
-            color
+            color,
+            req.empresa_id
         ]);
         // Registrar evento
         await registrarEvento({
@@ -89,7 +90,7 @@ export async function updateDepartamento(req, res) {
                 nombre = COALESCE($1, nombre), descripcion = COALESCE($2, descripcion),
                 ubicacion = COALESCE($3, ubicacion), jefes = COALESCE($4, jefes),
                 color = COALESCE($5, color), es_activo = COALESCE($6, es_activo)
-            WHERE id = $7 RETURNING *
+            WHERE id = $7 AND empresa_id = $8 RETURNING *
         `, [
             nombre,
             descripcion,
@@ -97,7 +98,8 @@ export async function updateDepartamento(req, res) {
             jefes !== undefined ? jefes : null,
             color,
             es_activo,
-            id
+            id,
+            req.empresa_id
         ]);
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
@@ -124,8 +126,8 @@ export async function deleteDepartamento(req, res) {
     try {
         const { id } = req.params;
         const resultado = await pool.query(`
-            UPDATE departamentos SET es_activo = false WHERE id = $1 AND es_activo = true RETURNING id
-        `, [id]);
+            UPDATE departamentos SET es_activo = false WHERE id = $1 AND empresa_id = $2 AND es_activo = true RETURNING id
+        `, [id, req.empresa_id]);
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Departamento no encontrado' });
         }
@@ -151,8 +153,8 @@ export async function reactivarDepartamento(req, res) {
     try {
         const { id } = req.params;
         const resultado = await pool.query(`
-            UPDATE departamentos SET es_activo = true WHERE id = $1 AND es_activo = false RETURNING id, nombre
-        `, [id]);
+            UPDATE departamentos SET es_activo = true WHERE id = $1 AND empresa_id = $2 AND es_activo = false RETURNING id, nombre
+        `, [id, req.empresa_id]);
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Departamento no encontrado o ya está activo' });
         }
