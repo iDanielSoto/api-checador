@@ -78,6 +78,8 @@ export async function verificarAutenticacion(req, res, next) {
         let permisosCombinadosBigInt = BigInt(0);
         let esAdmin = false;
 
+
+
         for (const rol of rolesResult.rows) {
             if (rol.permisos_bitwise) {
                 permisosCombinadosBigInt |= BigInt(rol.permisos_bitwise);
@@ -86,6 +88,8 @@ export async function verificarAutenticacion(req, res, next) {
                 esAdmin = true;
             }
         }
+
+
 
         // Adjuntar información del usuario al request
         req.usuario = {

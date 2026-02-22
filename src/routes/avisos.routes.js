@@ -4,13 +4,17 @@ import {
     getAllAvisos,
     createAviso,
     updateAviso,
-    deleteAviso
+    deleteAviso,
+    getAvisosPublicos
 } from '../controllers/avisos.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-// Todas las rutas requieren autenticación
+// Rutas públicas (sin autenticación)
+router.get('/publicos', getAvisosPublicos);
+
+// Todas las rutas siguientes requieren autenticación
 router.use(verificarAutenticacion);
 
 // Rutas para administración
@@ -19,7 +23,7 @@ router.post('/', createAviso);
 router.put('/:id', updateAviso);
 router.delete('/:id', deleteAviso);
 
-// Rutas públicas/empleados
+// Rutas para empleados (autenticadas)
 router.get('/globales', getGlobalAvisos);
 
 export default router;

@@ -3,7 +3,8 @@ import {
     registrarAsistencia,
     getAsistencias,
     getAsistenciasEmpleado,
-    getAsistenciasHoy
+    getAsistenciasHoy,
+    registrarAsistenciaManual
 } from '../controllers/asistencias.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { requirePermiso, requirePermisoOrSelf } from '../middleware/permissions.middleware.js';
@@ -19,5 +20,6 @@ router.get('/empleado/:empleadoId', requirePermisoOrSelf('empleadoId', 'REGISTRO
 // CRUD
 router.get('/', requirePermiso('REGISTRO_VER'), getAsistencias);
 router.post('/registrar', registrarAsistencia);  // Cualquier usuario autenticado puede registrar
+router.post('/manual', requirePermiso('REGISTRO_VER'), registrarAsistenciaManual); // Requiere permiso (ajustar si se necesita permiso específico de admin)
 
 export default router;

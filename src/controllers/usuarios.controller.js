@@ -843,6 +843,7 @@ export async function getUsuarioByUsername(req, res) {
                 u.es_empleado,
                 u.empresa_id,
                 u.fecha_registro,
+                e.id as empleado_id,
                 e.rfc,
                 e.nss,
                 e.horario_id,

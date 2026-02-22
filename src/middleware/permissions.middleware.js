@@ -39,6 +39,8 @@ export function requirePermiso(...permisosRequeridos) {
             return next();
         }
 
+        if (permisosRequeridos.length === 0) return next();
+
         // Verificar cada permiso requerido (OR)
         for (const permiso of permisosRequeridos) {
             const bitPosition = typeof permiso === 'string' ? PERMISOS[permiso] : permiso;

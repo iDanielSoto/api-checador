@@ -156,7 +156,6 @@ export async function createSolicitud(req, res) {
             dispositivos_temp
         } = req.body;
 
-        // Normalizar IP y MAC (si vienen como array, convertir a string)
         const ipString = Array.isArray(ip) ? ip.join(', ') : ip;
         const macString = Array.isArray(mac) ? mac.join(', ') : mac;
 
@@ -167,27 +166,21 @@ export async function createSolicitud(req, res) {
             });
         }
 
-
-        // Validar empresa_id
         let empresaIdFinal = empresa_id;
 
-        // Si no viene o es el placeholder EMA00000, buscar una válida
         if (!empresaIdFinal || empresaIdFinal === 'EMA00000') {
             const empresaDefault = await pool.query('SELECT id FROM empresas LIMIT 1');
             if (empresaDefault.rows.length > 0) {
                 empresaIdFinal = empresaDefault.rows[0].id;
             } else {
-                // Si no hay empresas, no podemos crear solicitud (FK error)
                 return res.status(400).json({
                     success: false,
                     message: 'No hay empresas registradas en el sistema'
                 });
             }
         } else {
-            // Verificar si la empresa dada existe
             const empresaExiste = await pool.query('SELECT id FROM empresas WHERE id = $1', [empresaIdFinal]);
             if (empresaExiste.rows.length === 0) {
-                // Si la ID dada no existe, usar default
                 const empresaDefault = await pool.query('SELECT id FROM empresas LIMIT 1');
                 if (empresaDefault.rows.length > 0) {
                     empresaIdFinal = empresaDefault.rows[0].id;
@@ -195,30 +188,54 @@ export async function createSolicitud(req, res) {
             }
         }
 
+        let id;
+        let token;
+
         if (macString) {
+            // Buscar si ya existe una solicitud con esta MAC (sin importar su estado)
             const existente = await pool.query(
-                "SELECT id FROM solicitudes WHERE mac = $1 AND estado = 'pendiente'",
+                "SELECT id FROM solicitudes WHERE mac = $1 ORDER BY fecha_registro DESC LIMIT 1",
                 [macString]
             );
+
             if (existente.rows.length > 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Ya existe una solicitud pendiente para este dispositivo'
-                });
+                // Actualizar la solicitud existente en lugar de duplicarla
+                id = existente.rows[0].id;
+                token = generateToken();
+
+                await pool.query(`
+                    UPDATE solicitudes SET
+                        tipo = $1,
+                        nombre = $2,
+                        descripcion = $3,
+                        correo = $4,
+                        ip = $5,
+                        sistema_operativo = $6,
+                        estado = 'pendiente',
+                        token = $7,
+                        empresa_id = $8,
+                        observaciones = $9,
+                        dispositivos_temp = $10,
+                        fecha_registro = CURRENT_TIMESTAMP,
+                        fecha_respuesta = NULL
+                    WHERE id = $11
+                `, [tipo, nombre, descripcion, correo, ipString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null, id]);
             }
         }
 
-        const id = await generateId(ID_PREFIXES.SOLICITUD);
-        const token = generateToken();
+        if (!id) {
+            // No existe, creamos una nueva
+            id = await generateId(ID_PREFIXES.SOLICITUD);
+            token = generateToken();
 
-        const resultado = await pool.query(`
-            INSERT INTO solicitudes (
-                id, tipo, nombre, descripcion, correo, ip, mac,
-                sistema_operativo, estado, token, empresa_id, observaciones, dispositivos_temp
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, $12)
-            RETURNING *
-        `, [id, tipo, nombre, descripcion, correo, ipString, macString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
+            await pool.query(`
+                INSERT INTO solicitudes (
+                    id, tipo, nombre, descripcion, correo, ip, mac,
+                    sistema_operativo, estado, token, empresa_id, observaciones, dispositivos_temp
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, $12)
+            `, [id, tipo, nombre, descripcion, correo, ipString, macString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
+        }
 
         // Registrar evento
         await registrarEvento({
@@ -226,12 +243,12 @@ export async function createSolicitud(req, res) {
             descripcion: `Se recibió solicitud de registro: ${nombre}`,
             tipo_evento: TIPOS_EVENTO.SOLICITUD,
             prioridad: PRIORIDADES.MEDIA,
-            detalles: { solicitud_id: id, tipo, nombre, ip, mac }
+            detalles: { solicitud_id: id, tipo, nombre, ip: ipString, mac: macString }
         });
 
         // Notificar a clientes SSE
         broadcast('nueva-solicitud', {
-            id: resultado.rows[0].id,
+            id,
             tipo,
             nombre,
             estado: 'pendiente'
@@ -239,12 +256,8 @@ export async function createSolicitud(req, res) {
 
         res.status(201).json({
             success: true,
-            message: 'Solicitud creada correctamente. Espere aprobación.',
-            data: {
-                id: resultado.rows[0].id,
-                token: resultado.rows[0].token,
-                estado: resultado.rows[0].estado
-            }
+            message: 'Solicitud creada/actualizada correctamente. Espere aprobación.',
+            data: { id, token, estado: 'pendiente' }
         });
 
     } catch (error) {
@@ -287,35 +300,61 @@ export async function aceptarSolicitud(req, res) {
         let biometricos_ids = [];
 
         if (sol.tipo === 'escritorio') {
-            dispositivo_id = await generateId(ID_PREFIXES.ESCRITORIO);
-
-            // Procesar dispositivos_temp si existen
             const dispositivos_temp = sol.dispositivos_temp || [];
 
-            // Generar IDs de biométricos
             for (const dispositivo of dispositivos_temp) {
                 const biometrico_id = await generateId(ID_PREFIXES.BIOMETRICO);
-                biometricos_ids.push({
-                    id: biometrico_id,
-                    ...dispositivo
-                });
+                biometricos_ids.push({ id: biometrico_id, ...dispositivo });
             }
 
-            // 1. Crear el escritorio con los IDs de biométricos
-            await client.query(`
-                INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-            `, [
-                dispositivo_id,
-                sol.nombre,
-                sol.descripcion,
-                sol.ip,
-                sol.mac,
-                sol.sistema_operativo,
-                biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null
-            ]);
+            // Buscar si ya existe un escritorio con esta MAC
+            const escritorioExistente = await client.query(
+                "SELECT id FROM escritorio WHERE mac = $1 LIMIT 1",
+                [sol.mac]
+            );
 
-            // 2. Crear registros biométricos (ahora el escritorio ya existe)
+            if (escritorioExistente.rows.length > 0) {
+                // Reactivar el escritorio existente
+                dispositivo_id = escritorioExistente.rows[0].id;
+
+                // Desactivar biométricos pasados para no tener duplicados
+                await client.query(`UPDATE biometrico SET es_activo = false WHERE escritorio_id = $1`, [dispositivo_id]);
+
+                await client.query(`
+                    UPDATE escritorio SET 
+                        nombre = $2,
+                        descripcion = $3,
+                        ip = $4,
+                        sistema_operativo = $5,
+                        dispositivos_biometricos = $6,
+                        es_activo = true
+                    WHERE id = $1
+                `, [
+                    dispositivo_id,
+                    sol.nombre,
+                    sol.descripcion,
+                    sol.ip,
+                    sol.sistema_operativo,
+                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null
+                ]);
+            } else {
+                // Crear el escritorio nuevo
+                dispositivo_id = await generateId(ID_PREFIXES.ESCRITORIO);
+                await client.query(`
+                    INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+                `, [
+                    dispositivo_id,
+                    sol.nombre,
+                    sol.descripcion,
+                    sol.ip,
+                    sol.mac,
+                    sol.sistema_operativo,
+                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null
+                ]);
+            }
+
+            // Crear registros biométricos nuevos
             for (const dispositivo of biometricos_ids) {
                 await client.query(`
                     INSERT INTO biometrico (id, nombre, descripcion, tipo, ip, puerto, estado, es_activo, escritorio_id)
@@ -331,7 +370,6 @@ export async function aceptarSolicitud(req, res) {
                 ]);
             }
 
-            // Extraer solo los IDs para la respuesta
             biometricos_ids = biometricos_ids.map(b => b.id);
 
         } else if (sol.tipo === 'movil') {
@@ -373,18 +411,9 @@ export async function aceptarSolicitud(req, res) {
             }
         });
 
-        const responseData = {
-            solicitud_id: id,
-            dispositivo_id,
-            tipo: sol.tipo
-        };
+        const responseData = { solicitud_id: id, dispositivo_id, tipo: sol.tipo };
+        if (biometricos_ids.length > 0) { responseData.biometricos_ids = biometricos_ids; }
 
-        // Incluir IDs de biométricos si se crearon
-        if (biometricos_ids.length > 0) {
-            responseData.biometricos_ids = biometricos_ids;
-        }
-
-        // Notificar a clientes SSE
         broadcast('solicitud-actualizada', { id, estado: 'aceptado', tipo: sol.tipo });
 
         res.json({

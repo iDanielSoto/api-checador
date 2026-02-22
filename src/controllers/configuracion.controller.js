@@ -171,3 +171,33 @@ export async function toggleMantenimiento(req, res) {
         });
     }
 }
+
+/**
+ * GET /api/configuracion/public/status
+ * Obtiene el estado de mantenimiento público
+ */
+export async function getMantenimientoStatus(req, res) {
+    try {
+        const resultado = await pool.query('SELECT es_mantenimiento FROM configuraciones LIMIT 1');
+
+        if (resultado.rows.length === 0) {
+            return res.json({
+                success: true,
+                maintenance: false // Default to false if no config found
+            });
+        }
+
+        res.json({
+            success: true,
+            maintenance: resultado.rows[0].es_mantenimiento
+        });
+    } catch (error) {
+        console.error('Error en getMantenimientoStatus:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al verificar estado del sistema'
+        });
+    }
+}
+
+

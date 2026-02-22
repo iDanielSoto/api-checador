@@ -329,3 +329,35 @@ export async function deleteAviso(req, res) {
         client.release();
     }
 }
+
+/**
+ * GET /api/avisos/publicos
+ * Obtiene los avisos públicos (globales) sin necesidad de autenticación
+ */
+export async function getAvisosPublicos(req, res) {
+    try {
+        const resultado = await pool.query(`
+            SELECT 
+                a.id, 
+                a.titulo, 
+                a.contenido, 
+                a.fecha_registro,
+                u.nombre as remitente_nombre
+            FROM avisos a
+            LEFT JOIN usuarios u ON u.id = a.creado_por
+            WHERE a.es_global = true 
+            ORDER BY a.fecha_registro DESC
+        `);
+
+        res.json({
+            success: true,
+            data: resultado.rows
+        });
+    } catch (error) {
+        console.error('Error en getAvisosPublicos:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al obtener avisos públicos'
+        });
+    }
+}

@@ -2,7 +2,7 @@ import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { broadcast } from '../utils/sse.js';
 
-const MINUTOS_SEPARACION_TURNOS = 15;
+const MINUTOS_NUEVO_TURNO_UMBRAL = 120; // 2 horas (120 minutos)
 
 function agruparTurnosConcatenados(turnos) {
     if (!turnos || turnos.length === 0) {
@@ -21,7 +21,9 @@ function agruparTurnosConcatenados(turnos) {
         const [hEntrada, mEntrada] = turnoActual.entrada.split(':').map(Number);
         const minutosEntrada = hEntrada * 60 + mEntrada;
         const diferencia = minutosEntrada - minutosSalida;
-        if (diferencia <= MINUTOS_SEPARACION_TURNOS) {
+
+        // Bloques de tiempo menores a 2 horas (120 min) = mismo turno
+        if (diferencia < MINUTOS_NUEVO_TURNO_UMBRAL) {
             grupoActual.push(turnoActual);
         } else {
             grupos.push(grupoActual);
@@ -83,19 +85,33 @@ function calcularEstadoEntrada(turno, horaActual, tolerancia) {
     const minEntradaTurno = horaEntrada * 60 + minEntrada;
     const minutosAnticipado = tolerancia.minutos_anticipado_max || 60;
     const inicioVentana = minEntradaTurno - minutosAnticipado;
-    const finToleranciaRetardo = minEntradaTurno + tolerancia.minutos_retardo;
-    const finToleranciaFalta = minEntradaTurno + tolerancia.minutos_falta;
-    if (horaActual >= inicioVentana && horaActual <= finToleranciaRetardo) {
+
+    // Lógica dinámica de Post-its:
+    // Puntual: <= 10 minutos (tolerancia general asumida)
+    const margenPuntual = minEntradaTurno + 10;
+    const margenRetardoA = minEntradaTurno + 20; // Hasta 20 min
+    const margenRetardoB = minEntradaTurno + 29; // Hasta 29 min
+
+    if (horaActual >= inicioVentana && horaActual <= margenPuntual) {
         return 'puntual';
     }
-    if (horaActual > finToleranciaRetardo && horaActual <= finToleranciaFalta) {
-        return 'retardo';
+
+    if (horaActual > margenPuntual && horaActual <= margenRetardoA) {
+        return 'retardo_a';
     }
+
+    if (horaActual > margenRetardoA && horaActual <= margenRetardoB) {
+        return 'retardo_b';
+    }
+
     const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
     const minSalidaTurno = horaSalida * 60 + minSalida;
-    if (horaActual > finToleranciaFalta && horaActual <= minSalidaTurno) {
-        return 'falta';
+
+    // Si pasaron 30 o más minutos pero todavía es turno, cuenta como falta por retardo mayor
+    if (horaActual > margenRetardoB && horaActual <= minSalidaTurno) {
+        return 'falta_por_retardo';
     }
+
     return 'falta';
 }
 
@@ -316,6 +332,77 @@ export async function registrarAsistencia(req, res) {
                 departamento_id
             })
         ]);
+
+        // ==========================================
+        // FASE 2: Acumulación de Retardos (A y B)
+        // ==========================================
+        if (estado === 'retardo_a' || estado === 'retardo_b') {
+            const isRetardoA = estado === 'retardo_a';
+            const columnaRetardo = isRetardoA ? 'contador_retardos_a' : 'contador_retardos_b';
+            const limiteRetardos = isRetardoA ? 10 : 5;
+
+            // Actualizar el contador en la tabla empleados y obtener el nuevo valor
+            const updateRes = await pool.query(`
+                UPDATE empleados
+                SET ${columnaRetardo} = ${columnaRetardo} + 1
+                WHERE id = $1
+                RETURNING ${columnaRetardo}
+            `, [empleado_id]);
+
+            const contadorActual = updateRes.rows[0][columnaRetardo];
+            console.log(`[Asistencia] Empleado ${empleado_id} sumó 1 a ${columnaRetardo}. Total: ${contadorActual}/${limiteRetardos}`);
+
+            // Si llega al límite de retardos, se convierte en falta
+            if (contadorActual >= limiteRetardos) {
+                // 1. Reiniciar el contador a 0
+                await pool.query(`
+                    UPDATE empleados
+                    SET ${columnaRetardo} = 0
+                    WHERE id = $1
+                `, [empleado_id]);
+
+                // 2. Crear una nueva "asistencia" con estado 'falta' y tipo 'sistema' para representarlo
+                const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
+                const motivoFalta = `Acumulación de ${limiteRetardos} retardos tipo ${isRetardoA ? 'A' : 'B'}`;
+
+                await pool.query(`
+                    INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo)
+                VALUES($1, 'falta', 'sistema', $2, $3, 'sistema')
+                    `, [idFalta, empleado_id, departamento_id]);
+
+                // 3. Registrar el Evento de "Falta Acumulada"
+                const idEventoFalta = await generateId(ID_PREFIXES.EVENTO);
+                const tipoR = isRetardoA ? 'A' : 'B';
+                await pool.query(`
+                    INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
+                VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)
+                `, [
+                    idEventoFalta,
+                    'Falta por Acumulación de Retardos',
+                    `${empleado.rows[0].nombre} alcanzó el límite de acumulaciones de Retardo ${tipoR}. Se ha generado una falta.`,
+                    empleado_id,
+                    JSON.stringify({
+                        asistencia_id: idFalta,
+                        estado: 'falta',
+                        motivo: motivoFalta
+                    })
+                ]);
+
+                console.log(`[Asistencia] Falta generada automáticamente por acumulación para el empleado ${empleado_id}.`);
+
+                broadcast('nueva-asistencia', {
+                    id: idFalta,
+                    empleado_id,
+                    empleado_nombre: empleado.rows[0].nombre,
+                    estado: 'falta',
+                    tipo: 'sistema',
+                    motivo: motivoFalta,
+                    fecha: new Date()
+                });
+            }
+        }
+        // ==========================================
+
         res.status(201).json({
             success: true,
             message: `Asistencia registrada como ${estado} `,
@@ -355,25 +442,25 @@ export async function getAsistencias(req, res) {
             offset = 0
         } = req.query;
         let query = `
-            SELECT
+                SELECT
                 a.id,
-                a.estado,
-                a.dispositivo_origen,
-                a.ubicacion,
-                a.fecha_registro,
-                a.empleado_id,
-                a.departamento_id,
-                a.tipo,
-                u.nombre as empleado_nombre,
-                u.usuario as empleado_usuario,
-                u.foto as empleado_foto,
-                d.nombre as departamento_nombre
+                    a.estado,
+                    a.dispositivo_origen,
+                    a.ubicacion,
+                    a.fecha_registro,
+                    a.empleado_id,
+                    a.departamento_id,
+                    a.tipo,
+                    u.nombre as empleado_nombre,
+                    u.usuario as empleado_usuario,
+                    u.foto as empleado_foto,
+                    d.nombre as departamento_nombre
             FROM asistencias a
             INNER JOIN empleados e ON e.id = a.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN departamentos d ON d.id = a.departamento_id
             WHERE 1 = 1
-    `;
+                    `;
         const params = [];
         let paramIndex = 1;
         if (empleado_id) {
@@ -382,7 +469,7 @@ export async function getAsistencias(req, res) {
         }
         if (departamento_id) {
             query += ` AND e.id IN(
-        SELECT empleado_id FROM empleados_departamentos
+                        SELECT empleado_id FROM empleados_departamentos
                 WHERE departamento_id = $${paramIndex++} AND es_activo = true
     )`;
             params.push(departamento_id);
@@ -420,7 +507,7 @@ export async function getAsistenciasEmpleado(req, res) {
         const { fecha_inicio, fecha_fin } = req.query;
         let query = `
             SELECT
-                a.id,
+            a.id,
                 a.estado,
                 a.dispositivo_origen,
                 a.ubicacion,
@@ -431,7 +518,7 @@ export async function getAsistenciasEmpleado(req, res) {
             FROM asistencias a
             LEFT JOIN departamentos d ON d.id = a.departamento_id
             WHERE a.empleado_id = $1
-    `;
+                `;
         const params = [empleadoId];
         let paramIndex = 2;
         if (fecha_inicio) {
@@ -446,17 +533,19 @@ export async function getAsistenciasEmpleado(req, res) {
         const resultado = await pool.query(query, params);
         const stats = await pool.query(`
             SELECT
-                COUNT(*) as total,
+            COUNT(*) as total,
                 COUNT(*) FILTER(WHERE estado = 'puntual') as puntuales,
-                COUNT(*) FILTER(WHERE estado = 'retardo') as retardos,
-                COUNT(*) FILTER(WHERE estado = 'falta') as faltas,
-                COUNT(*) FILTER(WHERE estado = 'salida_puntual') as salidas_puntuales,
-                COUNT(*) FILTER(WHERE estado = 'salida_temprano') as salidas_tempranas
+                    COUNT(*) FILTER(WHERE estado IN('retardo_a', 'retardo_b')) as retardos,
+                        COUNT(*) FILTER(WHERE estado = 'retardo_a') as retardos_a,
+                            COUNT(*) FILTER(WHERE estado = 'retardo_b') as retardos_b,
+                                COUNT(*) FILTER(WHERE estado IN('falta', 'falta_por_retardo')) as faltas,
+                                    COUNT(*) FILTER(WHERE estado = 'salida_puntual') as salidas_puntuales,
+                                        COUNT(*) FILTER(WHERE estado = 'salida_temprano') as salidas_tempranas
             FROM asistencias
             WHERE empleado_id = $1
             ${fecha_inicio ? `AND fecha_registro >= '${fecha_inicio}'` : ''}
             ${fecha_fin ? `AND fecha_registro <= '${fecha_fin}'` : ''}
-`, [empleadoId]);
+            `, [empleadoId]);
         res.json({
             success: true,
             data: resultado.rows,
@@ -477,7 +566,7 @@ export async function getAsistenciasHoy(req, res) {
         hoy.setHours(0, 0, 0, 0);
         let query = `
             SELECT
-                a.id,
+            a.id,
                 a.estado,
                 a.dispositivo_origen,
                 a.fecha_registro,
@@ -494,13 +583,13 @@ export async function getAsistenciasHoy(req, res) {
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN departamentos d ON d.id = a.departamento_id
             WHERE DATE(a.fecha_registro) = DATE($1)
-    `;
+                `;
         const params = [hoy];
         if (departamento_id) {
             query += ` AND e.id IN(
-        SELECT empleado_id FROM empleados_departamentos
+                    SELECT empleado_id FROM empleados_departamentos
                 WHERE departamento_id = $2 AND es_activo = true
-    )`;
+                )`;
             params.push(departamento_id);
         }
         query += ` ORDER BY a.fecha_registro DESC`;
@@ -508,8 +597,10 @@ export async function getAsistenciasHoy(req, res) {
         const resumen = {
             total: resultado.rows.length,
             puntuales: resultado.rows.filter(a => a.estado === 'puntual').length,
-            retardos: resultado.rows.filter(a => a.estado === 'retardo').length,
-            faltas: resultado.rows.filter(a => a.estado === 'falta').length,
+            retardos: resultado.rows.filter(a => a.estado === 'retardo_a' || a.estado === 'retardo_b').length,
+            retardos_a: resultado.rows.filter(a => a.estado === 'retardo_a').length,
+            retardos_b: resultado.rows.filter(a => a.estado === 'retardo_b').length,
+            faltas: resultado.rows.filter(a => a.estado === 'falta' || a.estado === 'falta_por_retardo').length,
             salidas_puntuales: resultado.rows.filter(a => a.estado === 'salida_puntual').length,
             salidas_tempranas: resultado.rows.filter(a => a.estado === 'salida_temprano').length
         };
@@ -523,5 +614,198 @@ export async function getAsistenciasHoy(req, res) {
             success: false,
             message: 'Error al obtener asistencias de hoy'
         });
+    }
+}
+
+export async function registrarAsistenciaManual(req, res) {
+    const client = await pool.connect();
+    try {
+        const {
+            empleado_id,
+            fecha, // YYYY-MM-DD
+            hora_entrada, // HH:MM
+            hora_salida, // HH:MM
+            usar_horario, // boolean
+            motivo,
+            admin_id // ID del usuario que registra (opcional si viene de req.usuario)
+        } = req.body;
+
+        if (!empleado_id || !fecha) {
+            return res.status(400).json({
+                success: false,
+                message: 'Empleado y fecha son requeridos'
+            });
+        }
+
+
+        // Validar fecha futura
+        const fechaRegistro = new Date(fecha);
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        // Ajuste de zona horaria simple si es necesario, pero asumiendo fechas string YYYY-MM-DD
+        const fechaRegistroDia = new Date(fechaRegistro.toISOString().split('T')[0]);
+        const hoyDia = new Date(hoy.toISOString().split('T')[0]);
+
+        if (fechaRegistroDia > hoyDia) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: 'No se pueden registrar asistencias en fechas futuras'
+            });
+        }
+
+        // Validar duplicados
+        const duplicado = await client.query(
+            'SELECT id FROM asistencias WHERE empleado_id = $1 AND fecha_registro::date = $2 LIMIT 1',
+            [empleado_id, fecha]
+        );
+
+        if (duplicado.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: 'Ya existe un registro de asistencia para este empleado en la fecha seleccionada'
+            });
+        }
+
+        // Iniciar transacción
+        await client.query('BEGIN');
+
+        // Obtener datos del empleado
+        const empleadoQuery = await client.query(`
+            SELECT e.id, u.nombre, e.horario_id, h.configuracion
+            FROM empleados e
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            LEFT JOIN horarios h ON h.id = e.horario_id
+            WHERE e.id = $1
+                `, [empleado_id]);
+
+        if (empleadoQuery.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+        }
+
+        const empleado = empleadoQuery.rows[0];
+        let entradaFinal = hora_entrada;
+        let salidaFinal = hora_salida;
+
+        // Si usa horario, obtener horas del horario
+        if (usar_horario) {
+            const fechaObj = new Date(`${fecha} T00:00:00`);
+            const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+            const diaSemana = diasSemana[fechaObj.getDay()];
+
+            let horarioEncontrado = null;
+            if (empleado.configuracion) {
+                const config = typeof empleado.configuracion === 'string'
+                    ? JSON.parse(empleado.configuracion)
+                    : empleado.configuracion;
+
+                if (config.configuracion_semanal && config.configuracion_semanal[diaSemana]) {
+                    // Tomar el primer turno por defecto si hay múltiples
+                    const turnos = config.configuracion_semanal[diaSemana];
+                    if (turnos && turnos.length > 0) {
+                        horarioEncontrado = turnos[0];
+                    }
+                } else if (config.dias && config.dias.includes(diaSemana)) {
+                    // Configuración simple
+                    if (config.turnos && config.turnos.length > 0) {
+                        horarioEncontrado = config.turnos[0];
+                    }
+                }
+            }
+
+            if (!horarioEncontrado) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({
+                    success: false,
+                    message: `No se encontró horario configurado para el día ${diaSemana} `
+                });
+            }
+
+            entradaFinal = horarioEncontrado.inicio || horarioEncontrado.entrada;
+            salidaFinal = horarioEncontrado.fin || horarioEncontrado.salida;
+        }
+
+        if (!entradaFinal || !salidaFinal) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: 'Se requieren hora de entrada y salida'
+            });
+        }
+
+        // Crear timestamps completos
+        const fechaEntrada = `${fecha} ${entradaFinal}:00`; // YYYY-MM-DD HH:MM:00
+        const fechaSalida = `${fecha} ${salidaFinal}:00`;
+
+        // Insertar Entrada
+        const idEntrada = await generateId(ID_PREFIXES.ASISTENCIA);
+
+        await client.query(`
+            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, tipo, ubicacion)
+            VALUES($1, 'puntual', 'manual', $2, $3, 'entrada', '{"Registro Manual Admin"}')
+                `, [idEntrada, fechaEntrada, empleado_id]);
+
+        // Insertar Salida
+        const idSalida = await generateId(ID_PREFIXES.ASISTENCIA);
+        await client.query(`
+            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, tipo, ubicacion)
+            VALUES($1, 'salida_puntual', 'manual', $2, $3, 'salida', '{"Registro Manual Admin"}')
+                `, [idSalida, fechaSalida, empleado_id]);
+
+        // Insertar Evento de Alta Prioridad
+        const idEvento = await generateId(ID_PREFIXES.EVENTO);
+        const usuarioModificadorId = req.usuario?.id || admin_id; // Priorizar usuario autenticado
+
+        await client.query(`
+            INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
+            VALUES($1, $2, $3, 'asistencia_manual', 'alta', $4, $5)
+        `, [
+            idEvento,
+            'Asistencia Manual Registrada',
+            `Se registró asistencia manual completa para ${empleado.nombre} el día ${fecha}.Motivo: ${motivo || 'Sin motivo'} `,
+            empleado_id,
+            JSON.stringify({
+                fecha,
+                entrada: entradaFinal,
+                salida: salidaFinal,
+                registrado_por: usuarioModificadorId,
+                usuario_modificador_id: usuarioModificadorId,
+                motivo
+            })
+        ]);
+
+        await client.query('COMMIT');
+
+        // Notificar SSE (opcional, fuera de tx)
+        broadcast('nueva-asistencia', {
+            id: idEntrada,
+            empleado_id,
+            empleado_nombre: empleado.nombre,
+            estado: 'puntual',
+            tipo: 'entrada',
+            fecha: fechaEntrada
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'Asistencia manual registrada correctamente',
+            data: {
+                entrada: { id: idEntrada, hora: entradaFinal },
+                salida: { id: idSalida, hora: salidaFinal }
+            }
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en registrarAsistenciaManual:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al registrar asistencia manual',
+            error: error.message
+        });
+    } finally {
+        client.release();
     }
 }
