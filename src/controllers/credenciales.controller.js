@@ -248,7 +248,7 @@ export async function identificarPorFacial(req, res) {
         const resultado = await pool.query(`
             SELECT c.id, c.empleado_id, c.facial,
     e.rfc, e.nss, e.horario_id,
-    u.id as usuario_id, u.nombre, u.correo, u.foto
+    u.id as usuario_id, u.nombre, u.correo, u.foto, u.empresa_id
             FROM credenciales c
             INNER JOIN empleados e ON e.id = c.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
@@ -302,7 +302,7 @@ export async function identificarPorFacial(req, res) {
                 tipo_evento: TIPOS_EVENTO.AUTENTICACION,
                 prioridad: PRIORIDADES.BAJA,
                 empleado_id: mejorMatch.empleado_id,
-                detalles: { metodo: 'facial', matchScore }
+                detalles: { metodo: 'facial', matchScore, empresa_id: mejorMatch.empresa_id }
             });
 
             return res.json({
@@ -398,7 +398,8 @@ export async function loginPorPin(req, res) {
                 u.usuario,
                 u.telefono,
                 u.foto,
-                u.es_empleado
+                u.es_empleado,
+                u.empresa_id
             FROM credenciales c
             INNER JOIN empleados e ON e.id = c.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
@@ -429,7 +430,7 @@ export async function loginPorPin(req, res) {
             tipo_evento: TIPOS_EVENTO.AUTENTICACION,
             prioridad: PRIORIDADES.BAJA,
             empleado_id: datos.empleado_id,
-            detalles: { metodo: 'pin', usuario: datos.usuario }
+            detalles: { metodo: 'pin', usuario: datos.usuario, empresa_id: datos.empresa_id }
         });
         // Retornar datos del empleado y usuario estructurados
         res.json({

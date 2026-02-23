@@ -27,11 +27,13 @@ export async function getEventos(req, res) {
                 e.detalles,
                 e.fecha_registro,
                 e.empleado_id,
-                u.nombre as empleado_nombre
+                COALESCE(u.nombre, u_mod.nombre, u_tgt.nombre) as empleado_nombre
             FROM eventos e
             LEFT JOIN empleados emp ON emp.id = e.empleado_id
             LEFT JOIN usuarios u ON u.id = emp.usuario_id
-            WHERE (u.empresa_id = $1 OR e.empleado_id IS NULL)
+            LEFT JOIN usuarios u_tgt ON u_tgt.id = (e.detalles->>'usuario_id')
+            LEFT JOIN usuarios u_mod ON u_mod.id = (e.detalles->>'usuario_modificador_id')
+            WHERE $1::varchar IN (u.empresa_id::varchar, u_tgt.empresa_id::varchar, u_mod.empresa_id::varchar, e.empresa_id::varchar, e.detalles->>'empresa_id')
         `;
         const params = [req.empresa_id];
         let paramIndex = 2;
@@ -91,12 +93,14 @@ export async function getEventoById(req, res) {
         const resultado = await pool.query(`
             SELECT
                 e.*,
-                u.nombre as empleado_nombre
+                COALESCE(u.nombre, u_mod.nombre, u_tgt.nombre) as empleado_nombre
             FROM eventos e
             LEFT JOIN empleados emp ON emp.id = e.empleado_id
             LEFT JOIN usuarios u ON u.id = emp.usuario_id
-            WHERE e.id = $1
-        `, [id]);
+            LEFT JOIN usuarios u_tgt ON u_tgt.id = (e.detalles->>'usuario_id')
+            LEFT JOIN usuarios u_mod ON u_mod.id = (e.detalles->>'usuario_modificador_id')
+            WHERE e.id = $1 AND $2::varchar IN (u.empresa_id::varchar, u_tgt.empresa_id::varchar, u_mod.empresa_id::varchar, e.empresa_id::varchar, e.detalles->>'empresa_id')
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -179,11 +183,13 @@ export async function getEventosRecientes(req, res) {
                 e.tipo_evento,
                 e.prioridad,
                 e.fecha_registro,
-                u.nombre as empleado_nombre
+                COALESCE(u.nombre, u_mod.nombre, u_tgt.nombre) as empleado_nombre
             FROM eventos e
             LEFT JOIN empleados emp ON emp.id = e.empleado_id
             LEFT JOIN usuarios u ON u.id = emp.usuario_id
-            WHERE (u.empresa_id = $1 OR emp.id IS NULL)
+            LEFT JOIN usuarios u_tgt ON u_tgt.id = (e.detalles->>'usuario_id')
+            LEFT JOIN usuarios u_mod ON u_mod.id = (e.detalles->>'usuario_modificador_id')
+            WHERE $1::varchar IN (u.empresa_id::varchar, u_tgt.empresa_id::varchar, u_mod.empresa_id::varchar, e.empresa_id::varchar, e.detalles->>'empresa_id')
             ORDER BY e.fecha_registro DESC
             LIMIT $2
         `, [req.empresa_id, parseInt(limit)]);
@@ -210,31 +216,39 @@ export async function getStatsEventos(req, res) {
     try {
         const { fecha_inicio, fecha_fin } = req.query;
 
-        let whereClause = '';
-        const params = [];
+        let whereClause = `WHERE $1::varchar IN (u.empresa_id::varchar, u_tgt.empresa_id::varchar, u_mod.empresa_id::varchar, e.empresa_id::varchar, e.detalles->>'empresa_id')`;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (fecha_inicio && fecha_fin) {
-            whereClause = 'WHERE fecha_registro BETWEEN $1 AND $2';
+            whereClause += ` AND e.fecha_registro BETWEEN $${paramIndex++} AND $${paramIndex++}`;
             params.push(fecha_inicio, fecha_fin);
         }
 
+        const baseJoins = `
+            FROM eventos e
+            LEFT JOIN empleados emp ON emp.id = e.empleado_id
+            LEFT JOIN usuarios u ON u.id = emp.usuario_id
+            LEFT JOIN usuarios u_tgt ON u_tgt.id = (e.detalles->>'usuario_id')
+            LEFT JOIN usuarios u_mod ON u_mod.id = (e.detalles->>'usuario_modificador_id')
+            ${whereClause}
+        `;
+
         const resultado = await pool.query(`
             SELECT
-                tipo_evento,
+                e.tipo_evento,
                 COUNT(*) as total
-            FROM eventos
-            ${whereClause}
-            GROUP BY tipo_evento
+            ${baseJoins}
+            GROUP BY e.tipo_evento
             ORDER BY total DESC
         `, params);
 
         const porPrioridad = await pool.query(`
             SELECT
-                prioridad,
+                e.prioridad,
                 COUNT(*) as total
-            FROM eventos
-            ${whereClause}
-            GROUP BY prioridad
+            ${baseJoins}
+            GROUP BY e.prioridad
         `, params);
 
         res.json({

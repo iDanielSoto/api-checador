@@ -2,6 +2,7 @@ import { pool } from '../config/db.js';
 import { generateId, generateToken, ID_PREFIXES } from '../utils/idGenerator.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 import { addClient, broadcast } from '../utils/sse.js';
+import { ejecutarValidacionesRed } from '../utils/networkValidator.js';
 
 /**
  * GET /api/solicitudes
@@ -183,6 +184,35 @@ export async function createSolicitud(req, res) {
             }
         }
 
+        // --- Validar segmentos de red ---
+        // Obtener segmentos de red configurados para la empresa
+        let fueraDeRed = false;
+        let alertasRed = [];
+        try {
+            const cfgRes = await pool.query(`
+                SELECT c.segmentos_red
+                FROM configuraciones c
+                INNER JOIN empresas e ON e.configuracion_id = c.id
+                WHERE e.id = $1
+            `, [empresaIdFinal]);
+
+            const segmentosRed = cfgRes.rows[0]?.segmentos_red || [];
+
+            const validacion = ejecutarValidacionesRed({
+                ip: ipString,
+                segmentosRed
+            });
+
+            fueraDeRed = validacion.fueraDeRed;
+            alertasRed = validacion.alertas;
+
+            if (fueraDeRed) {
+                console.warn(`⚠️ [solicitudes] IP fuera de malla: ${ipString} | Empresa: ${empresaIdFinal}`);
+            }
+        } catch (netErr) {
+            console.error('[solicitudes] Error al validar red (no crítico):', netErr.message);
+        }
+
         let id;
         let token;
 
@@ -211,10 +241,11 @@ export async function createSolicitud(req, res) {
                         empresa_id = $8,
                         observaciones = $9,
                         dispositivos_temp = $10,
+                        advertencia_red = $11,
                         fecha_registro = CURRENT_TIMESTAMP,
                         fecha_respuesta = NULL
-                    WHERE id = $11
-                `, [tipo, nombre, descripcion, correo, ipString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null, id]);
+                    WHERE id = $12
+                `, [tipo, nombre, descripcion, correo, ipString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null, fueraDeRed, id]);
             }
         }
 
@@ -226,19 +257,19 @@ export async function createSolicitud(req, res) {
             await pool.query(`
                 INSERT INTO solicitudes (
                     id, tipo, nombre, descripcion, correo, ip, mac,
-                    sistema_operativo, estado, token, empresa_id, observaciones, dispositivos_temp
+                    sistema_operativo, estado, token, empresa_id, observaciones, dispositivos_temp, advertencia_red
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, $12)
-            `, [id, tipo, nombre, descripcion, correo, ipString, macString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null]);
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pendiente', $9, $10, $11, $12, $13)
+            `, [id, tipo, nombre, descripcion, correo, ipString, macString, sistema_operativo, token, empresaIdFinal, observaciones, dispositivos_temp ? JSON.stringify(dispositivos_temp) : null, fueraDeRed]);
         }
 
-        // Registrar evento
+        // Registrar evento (prioridad ALTA si IP fuera de malla)
         await registrarEvento({
-            titulo: `Nueva solicitud de ${tipo}`,
+            titulo: `Nueva solicitud de ${tipo}${fueraDeRed ? ' ⚠️ IP fuera de red' : ''}`,
             descripcion: `Se recibió solicitud de registro: ${nombre}`,
             tipo_evento: TIPOS_EVENTO.SOLICITUD,
-            prioridad: PRIORIDADES.MEDIA,
-            detalles: { solicitud_id: id, tipo, nombre, ip: ipString, mac: macString }
+            prioridad: fueraDeRed ? PRIORIDADES.ALTA : PRIORIDADES.MEDIA,
+            detalles: { solicitud_id: id, tipo, nombre, ip: ipString, mac: macString, alertas_red: alertasRed }
         });
 
         // Notificar a clientes SSE

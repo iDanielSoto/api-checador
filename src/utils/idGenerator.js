@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { requestContext } from './context.js';
 
 /**
  * Prefijos estándar para cada entidad (3 caracteres)
@@ -77,10 +78,14 @@ export async function generateId(prefix) {
     const result = await pool.query(`SELECT nextval('${sequenceName}') as num`);
     const num = parseInt(result.rows[0].num);
 
-    // Convertir a hexadecimal y rellenar con ceros (5 dígitos)
-    const hexPart = num.toString(16).toUpperCase().padStart(5, '0');
+    // Convertir a hexadecimal y rellenar con ceros (32 dígitos)
+    const hexPart = num.toString(16).toUpperCase().padStart(32, '0');
 
-    return prefixClean + hexPart;
+    // Obtener el prefijo de la empresa (o 'SYS')
+    const store = requestContext.getStore();
+    const prefixEmpresa = store?.get('empresa_prefijo') || 'SYS';
+
+    return `${prefixEmpresa}-${prefixClean}-${hexPart}`;
 }
 
 /**
@@ -97,12 +102,15 @@ export async function generateIds(prefix, count) {
         throw new Error(`Prefijo desconocido: ${prefixClean}`);
     }
 
+    const store = requestContext.getStore();
+    const prefixEmpresa = store?.get('empresa_prefijo') || 'SYS';
+
     const ids = [];
     for (let i = 0; i < count; i++) {
         const result = await pool.query(`SELECT nextval('${sequenceName}') as num`);
         const num = parseInt(result.rows[0].num);
-        const hexPart = num.toString(16).toUpperCase().padStart(5, '0');
-        ids.push(prefixClean + hexPart);
+        const hexPart = num.toString(16).toUpperCase().padStart(32, '0');
+        ids.push(`${prefixEmpresa}-${prefixClean}-${hexPart}`);
     }
 
     return ids;

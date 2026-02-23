@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { requestContext } from '../utils/context.js';
 
 /**
  * Middleware para gestionar el Aislamiento de Múltiples Empresas (Multi-Tenant)
@@ -48,6 +49,20 @@ export async function verificarEmpresa(req, res, next) {
 
         // Inyectar el empresa_id en la solicitud para que los controladores lo utilicen
         req.empresa_id = empresa_id;
+
+        // Obtener el prefijo de la empresa si existe (o default a FAS si es admin global, etc.)
+        const resPref = await pool.query('SELECT prefijo FROM empresas WHERE id = $1', [empresa_id]);
+        let pfx = 'SYS';
+        if (resPref.rows.length > 0 && resPref.rows[0].prefijo) {
+            pfx = resPref.rows[0].prefijo;
+        }
+
+        const store = requestContext.getStore();
+        if (store) {
+            store.set('empresa_id', empresa_id);
+            store.set('empresa_prefijo', pfx);
+        }
+
         next();
     } catch (error) {
         console.error('Error en middleware verificarEmpresa:', error);

@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { ejecutarValidacionesRed } from '../utils/networkValidator.js';
 
 /**
  * GET /api/movil/sync/mis-datos
@@ -229,14 +230,53 @@ export const sincronizarAsistencias = async (req, res) => {
                 // Generar ID
                 const servidor_id = await generateId(ID_PREFIXES.ASISTENCIA);
 
-                // Insertar registro
-                // Campos: id, empleado_id, tipo, estado, departamento_id, dispositivo_origen, fecha_registro
-                // Nota: 'metodo_registro' no parece estar en el esquema original del insert en escritorio.sync
+                // --- Validar segmentos de red para esta asistencia ---
+                let alertasReg = [];
+                try {
+                    // Obtener empresa del empleado y sus segmentos de red
+                    const empEmpresa = await pool.query(`
+                        SELECT e.id as empresa_id, c.segmentos_red
+                        FROM empleados emp
+                        INNER JOIN usuarios u ON emp.usuario_id = u.id
+                        INNER JOIN empresas e ON e.id = u.empresa_id
+                        INNER JOIN configuraciones c ON c.id = e.configuracion_id
+                        WHERE emp.id = $1
+                    `, [reg.empleado_id]);
+
+                    if (empEmpresa.rows.length > 0) {
+                        const segmentosRed = empEmpresa.rows[0].segmentos_red || [];
+
+                        // Extraer coordenadas GPS si el móvil las envió
+                        let coordenadas = null;
+                        if (reg.ubicacion && Array.isArray(reg.ubicacion) && reg.ubicacion.length >= 2) {
+                            coordenadas = { lat: reg.ubicacion[0], lng: reg.ubicacion[1] };
+                        } else if (reg.lat && reg.lng) {
+                            coordenadas = { lat: reg.lat, lng: reg.lng };
+                        }
+
+                        const validacion = ejecutarValidacionesRed({
+                            ip: reg.ip || null,
+                            segmentosRed,
+                            coordenadas,
+                            wifi: reg.wifi || null,  // { bssid, ssid } si el móvil lo envía
+                        });
+
+                        alertasReg = validacion.alertas;
+
+                        if (alertasReg.length > 0) {
+                            console.warn(`⚠️ [movilSync] Alertas de red para ${reg.empleado_id}:`, alertasReg.map(a => a.tipo).join(', '));
+                        }
+                    }
+                } catch (netErr) {
+                    console.error('[movilSync] Error al validar red (no crítico):', netErr.message);
+                }
+
+                // Insertar registro con alertas de red
                 await pool.query(`
                     INSERT INTO asistencias
                     (id, empleado_id, tipo, estado, departamento_id,
-                     dispositivo_origen, fecha_registro, ubicacion)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                     dispositivo_origen, fecha_registro, ubicacion, alertas)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 `, [
                     servidor_id,
                     reg.empleado_id,
@@ -245,7 +285,8 @@ export const sincronizarAsistencias = async (req, res) => {
                     reg.departamento_id || null,
                     reg.dispositivo_origen || 'movil',
                     fecha,
-                    reg.ubicacion || null
+                    reg.ubicacion || null,
+                    JSON.stringify(alertasReg)
                 ]);
 
                 sincronizados.push({

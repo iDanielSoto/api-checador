@@ -64,7 +64,7 @@ export async function getMiEmpresa(req, res) {
             SELECT
                 e.id, e.nombre, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
                 e.configuracion_id,
-                c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora,
+                c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora, c.segmentos_red,
                 (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
                 (SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id = e.id AND u.estado_cuenta = 'activo') as total_usuarios
             FROM empresas e
@@ -191,17 +191,11 @@ export async function createEmpresa(req, res) {
             });
         }
 
-        await client.query('BEGIN');
+        // NOTA: El constraint de BD (usuario, empresa_id) y (correo, empresa_id)
+        // garantiza unicidad por empresa. No se valida globalmente porque el mismo
+        // usuario/correo puede existir en empresas distintas (multi-tenant).
 
-        // 1. Validar que el Administrador deseado no exista globalmente
-        const userExists = await client.query('SELECT id FROM usuarios WHERE usuario = $1 OR correo = $2', [admin_usuario, admin_correo]);
-        if (userExists.rows.length > 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({
-                success: false,
-                message: 'El nombre de usuario o correo para el Nuevo Administrador ya está registrado en el sistema.'
-            });
-        }
+        await client.query('BEGIN');
 
         // 2. Crear configuración de Tenant
         const configId = await generateId(ID_PREFIXES.CONFIGURACION);

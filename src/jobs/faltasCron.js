@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import logger from '../utils/logger.js';
+import { requestContext } from '../utils/context.js';
 
 /**
  * Cron job que registra faltas automáticas para empleados
@@ -33,9 +34,10 @@ async function registrarFaltasDelDia() {
 
     // Obtener todos los empleados activos con horario asignado
     const empleados = await pool.query(`
-        SELECT e.id as empleado_id, e.horario_id, u.nombre, h.configuracion
+        SELECT e.id as empleado_id, e.horario_id, u.nombre, h.configuracion, u.empresa_id, em.prefijo as empresa_prefijo
         FROM empleados e
         INNER JOIN usuarios u ON u.id = e.usuario_id
+        INNER JOIN empresas em ON em.id = u.empresa_id
         INNER JOIN horarios h ON h.id = e.horario_id AND h.es_activo = true
         WHERE u.estado_cuenta = 'activo'
           AND e.horario_id IS NOT NULL
@@ -91,34 +93,38 @@ async function registrarFaltasDelDia() {
             const fechaRegistro = new Date();
             fechaRegistro.setHours(parseInt(hora), parseInt(minuto), 0, 0);
 
-            // Registrar falta con la fecha calculada
-            const id = await generateId(ID_PREFIXES.ASISTENCIA);
-            await pool.query(`
-                INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, fecha_registro)
-                VALUES($1, 'falta', 'escritorio', $2, $3, $4)
-            `, [id, emp.empleado_id, departamentoId, fechaRegistro.toISOString()]);
+            await requestContext.run(new Map([['empresa_prefijo', emp.empresa_prefijo]]), async () => {
+                // Registrar falta con la fecha calculada
+                const id = await generateId(ID_PREFIXES.ASISTENCIA);
+                await pool.query(`
+                    INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, fecha_registro, empresa_id)
+                    VALUES($1, 'falta', 'escritorio', $2, $3, $4, $5)
+                `, [id, emp.empleado_id, departamentoId, fechaRegistro.toISOString(), emp.empresa_id]);
 
-            // Registrar evento
-            const eventoId = await generateId(ID_PREFIXES.EVENTO);
-            await pool.query(`
-                INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro)
-                VALUES($1, $2, $3, 'asistencia', 'media', $4, $5, $6)
-            `, [
-                eventoId,
-                'Falta registrada automáticamente',
-                `${emp.nombre} no registró asistencia el día de hoy`,
-                emp.empleado_id,
-                JSON.stringify({
-                    asistencia_id: id,
-                    estado: 'falta',
-                    dispositivo_origen: 'escritorio',
-                    tipo: 'entrada',
-                    departamento_id: departamentoId,
-                    automatico: true,
-                    horario_turno: turnoHoy
-                }),
-                fechaRegistro.toISOString()
-            ]);
+                // Registrar evento
+                const eventoId = await generateId(ID_PREFIXES.EVENTO);
+                await pool.query(`
+                    INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, empresa_id, detalles, fecha_registro)
+                    VALUES($1, $2, $3, 'asistencia', 'media', $4, $5, $6, $7)
+                `, [
+                    eventoId,
+                    'Falta registrada automáticamente',
+                    `${emp.nombre} no registró asistencia el día de hoy`,
+                    emp.empleado_id,
+                    emp.empresa_id,
+                    JSON.stringify({
+                        asistencia_id: id,
+                        estado: 'falta',
+                        dispositivo_origen: 'escritorio',
+                        tipo: 'entrada',
+                        departamento_id: departamentoId,
+                        automatico: true,
+                        horario_turno: turnoHoy,
+                        empresa_id: emp.empresa_id
+                    }),
+                    fechaRegistro.toISOString()
+                ]);
+            });
 
             faltasRegistradas++;
         } catch (error) {

@@ -69,10 +69,24 @@ export async function registrarEvento({
     prioridad = PRIORIDADES.MEDIA,
     empleado_id = null,
     usuario_modificador_id = null,
+    empresa_id = null,
     detalles = {}
 }) {
     try {
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
+
+        let targetEmpresaId = empresa_id;
+        if (!targetEmpresaId && detalles.empresa_id) {
+            targetEmpresaId = detalles.empresa_id;
+        }
+        if (!targetEmpresaId && empleado_id) {
+            const empRes = await pool.query('SELECT u.empresa_id FROM empleados e JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1', [empleado_id]);
+            if (empRes.rows.length > 0) targetEmpresaId = empRes.rows[0].empresa_id;
+        }
+        if (!targetEmpresaId && usuario_modificador_id) {
+            const usrRes = await pool.query('SELECT empresa_id FROM usuarios WHERE id = $1', [usuario_modificador_id]);
+            if (usrRes.rows.length > 0) targetEmpresaId = usrRes.rows[0].empresa_id;
+        }
 
         // Agregar usuario_modificador_id a detalles si está disponible y es legible
         const detallesCompletos = {
@@ -84,8 +98,8 @@ export async function registrarEvento({
         }
 
         await pool.query(`
-      INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, empresa_id, detalles)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     `, [
             eventoId,
             titulo,
@@ -93,6 +107,7 @@ export async function registrarEvento({
             tipo_evento,
             prioridad,
             empleado_id,
+            targetEmpresaId,
             JSON.stringify(detallesCompletos)
         ]);
 
@@ -123,13 +138,26 @@ export async function registrarEventosMultiples(eventos) {
                 ...evento.detalles
             };
 
+            let targetEmpresaId = evento.empresa_id;
+            if (!targetEmpresaId && detallesCompletos.empresa_id) {
+                targetEmpresaId = detallesCompletos.empresa_id;
+            }
+            if (!targetEmpresaId && evento.empleado_id) {
+                const empRes = await client.query('SELECT u.empresa_id FROM empleados e JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1', [evento.empleado_id]);
+                if (empRes.rows.length > 0) targetEmpresaId = empRes.rows[0].empresa_id;
+            }
+            if (!targetEmpresaId && evento.usuario_modificador_id) {
+                const usrRes = await client.query('SELECT empresa_id FROM usuarios WHERE id = $1', [evento.usuario_modificador_id]);
+                if (usrRes.rows.length > 0) targetEmpresaId = usrRes.rows[0].empresa_id;
+            }
+
             if (evento.usuario_modificador_id) {
                 detallesCompletos.usuario_modificador_id = evento.usuario_modificador_id;
             }
 
             await client.query(`
-        INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, empresa_id, detalles)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [
                 eventoId,
                 evento.titulo,
@@ -137,6 +165,7 @@ export async function registrarEventosMultiples(eventos) {
                 evento.tipo_evento,
                 evento.prioridad || PRIORIDADES.MEDIA,
                 evento.empleado_id || null,
+                targetEmpresaId || null,
                 JSON.stringify(detallesCompletos)
             ]);
 

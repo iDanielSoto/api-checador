@@ -188,15 +188,19 @@ export async function updateEmpleado(req, res) {
         const { id } = req.params;
         const { rfc, nss, horario_id, regimen_laboral } = req.body;
 
+        let paramsEmp = [rfc === undefined ? null : rfc, nss === undefined ? null : nss, regimen_laboral === undefined ? null : regimen_laboral];
+        let setClause = 'rfc = COALESCE($1, rfc), nss = COALESCE($2, nss), regimen_laboral = COALESCE($3, regimen_laboral)';
+        if (horario_id !== undefined) {
+            paramsEmp.push(horario_id === '' ? null : horario_id);
+            setClause += `, horario_id = $${paramsEmp.length}`;
+        }
+        paramsEmp.push(id);
+
         const resultado = await pool.query(`
-            UPDATE empleados SET
-                rfc = COALESCE($1, rfc),
-                nss = COALESCE($2, nss),
-                horario_id = COALESCE($3, horario_id),
-                regimen_laboral = COALESCE($4, regimen_laboral)
-            WHERE id = $5
+            UPDATE empleados SET ${setClause}
+            WHERE id = $${paramsEmp.length}
             RETURNING *
-        `, [rfc, nss, horario_id, regimen_laboral, id]);
+        `, paramsEmp);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

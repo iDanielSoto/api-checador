@@ -4,7 +4,8 @@ import {
     getAsistencias,
     getAsistenciasEmpleado,
     getAsistenciasHoy,
-    registrarAsistenciaManual
+    registrarAsistenciaManual,
+    getEquivalenciasEmpleado
 } from '../controllers/asistencias.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { verificarEmpresa } from '../middleware/tenant.middleware.js';
@@ -15,8 +16,9 @@ const router = Router();
 router.use(verificarAutenticacion);
 router.use(verificarEmpresa);
 
-// Rutas específzicas primero
+// Rutas específicas primero
 router.get('/hoy', requirePermiso('REGISTRO_VER'), getAsistenciasHoy);
+router.get('/empleado/:empleadoId/equivalencias', requirePermisoOrSelf('empleadoId', 'REGISTRO_VER'), getEquivalenciasEmpleado);
 router.get('/empleado/:empleadoId', requirePermisoOrSelf('empleadoId', 'REGISTRO_VER'), getAsistenciasEmpleado);
 
 // CRUD

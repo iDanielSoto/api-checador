@@ -105,7 +105,7 @@ export async function login(req, res) {
             tipo_evento: TIPOS_EVENTO.AUTENTICACION,
             prioridad: PRIORIDADES.BAJA,
             empleado_id: usuarioData.empleado_id,
-            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario }
+            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, empresa_id: usuarioData.empresa_id }
         });
 
         res.json({
@@ -334,7 +334,7 @@ export async function logout(req, res) {
                 tipo_evento: TIPOS_EVENTO.AUTENTICACION,
                 prioridad: PRIORIDADES.BAJA,
                 empleado_id: req.usuario.empleado_id,
-                detalles: { usuario_id: req.usuario.id }
+                detalles: { usuario_id: req.usuario.id, empresa_id: req.usuario.empresa_id }
             });
         }
 
@@ -554,7 +554,7 @@ export async function loginBiometrico(req, res) {
             tipo_evento: TIPOS_EVENTO.AUTENTICACION,
             prioridad: PRIORIDADES.BAJA,
             empleado_id: usuarioData.empleado_id,
-            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, metodo: 'biometrico' }
+            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, metodo: 'biometrico', empresa_id: usuarioData.empresa_id }
         });
 
         res.json({

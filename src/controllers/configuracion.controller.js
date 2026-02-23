@@ -86,11 +86,13 @@ export async function updateConfiguracion(req, res) {
             zona_horaria,
             paleta_colores,
             intentos_maximos,
-            orden_credenciales
+            orden_credenciales,
+            segmentos_red
         } = req.body;
 
         const paletaJson = paleta_colores ? JSON.stringify(paleta_colores) : null;
         const ordenJson = orden_credenciales ? JSON.stringify(orden_credenciales) : null;
+        const segmentosJson = segmentos_red ? JSON.stringify(segmentos_red) : null;
 
         const resultado = await pool.query(`
             UPDATE configuraciones SET
@@ -101,10 +103,11 @@ export async function updateConfiguracion(req, res) {
                 zona_horaria = COALESCE($5, zona_horaria),
                 paleta_colores = COALESCE($6, paleta_colores),
                 intentos_maximos = COALESCE($7, intentos_maximos),
-                orden_credenciales = COALESCE($8, orden_credenciales)
-            WHERE id = $9
+                orden_credenciales = COALESCE($8, orden_credenciales),
+                segmentos_red = COALESCE($9, segmentos_red)
+            WHERE id = $10
             RETURNING *
-        `, [idioma, es_mantenimiento, formato_fecha, formato_hora, zona_horaria, paletaJson, intentos_maximos, ordenJson, id]);
+        `, [idioma, es_mantenimiento, formato_fecha, formato_hora, zona_horaria, paletaJson, intentos_maximos, ordenJson, segmentosJson, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

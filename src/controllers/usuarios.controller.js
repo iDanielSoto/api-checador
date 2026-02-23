@@ -122,8 +122,8 @@ export async function getUsuarioById(req, res) {
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
             LEFT JOIN empresas emp ON emp.id = u.empresa_id
-            WHERE u.id = $1
-        `, [id]);
+            WHERE u.id = $1 AND u.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -205,16 +205,16 @@ export async function createUsuario(req, res) {
             });
         }
 
-        // Verificar unicidad
+        // Verificar unicidad dentro de la misma empresa
         const existe = await client.query(
-            'SELECT id FROM usuarios WHERE usuario = $1 OR correo = $2',
-            [usuario, correo]
+            'SELECT id FROM usuarios WHERE (usuario = $1 OR correo = $2) AND empresa_id = $3',
+            [usuario, correo, empresa_id]
         );
 
         if (existe.rows.length > 0) {
             return res.status(400).json({
                 success: false,
-                message: 'El usuario o correo ya existe'
+                message: 'El usuario o correo ya existe en esta empresa'
             });
         }
 
@@ -399,17 +399,16 @@ export async function updateUsuario(req, res) {
 
         const esEmpleadoActual = existe.rows[0].es_empleado;
 
-        // Verificar unicidad de usuario si se cambia
+        // Verificar unicidad de usuario dentro de la misma empresa si se cambia
         if (usuario) {
             const duplicado = await client.query(
-                'SELECT id FROM usuarios WHERE usuario = $1 AND id != $2',
-                [usuario, id]
+                'SELECT id FROM usuarios WHERE usuario = $1 AND empresa_id = $2 AND id != $3',
+                [usuario, existe.rows[0].empresa_id, id]
             );
             if (duplicado.rows.length > 0) {
-                // client.release() removido porque hay un finally
                 return res.status(400).json({
                     success: false,
-                    message: 'El nombre de usuario ya está en uso'
+                    message: 'El nombre de usuario ya está en uso en esta empresa'
                 });
             }
         }
@@ -467,13 +466,19 @@ export async function updateUsuario(req, res) {
                 await client.query('DELETE FROM empleados WHERE usuario_id = $1', [id]);
             } else if (es_empleado && esEmpleadoActual) {
                 // Actualizar datos de empleado
+                let paramsEmp = [rfc === undefined ? null : rfc, nss === undefined ? null : nss];
+                let setClause = 'rfc = COALESCE($1, rfc), nss = COALESCE($2, nss)';
+                if (horario_id !== undefined) {
+                    paramsEmp.push(horario_id === '' ? null : horario_id);
+                    setClause += `, horario_id = $${paramsEmp.length}`;
+                }
+                paramsEmp.push(id);
+
                 await client.query(`
-                    UPDATE empleados SET
-                        rfc = COALESCE($1, rfc),
-                        nss = COALESCE($2, nss),
-                        horario_id = $3
-                    WHERE usuario_id = $4
-                `, [rfc, nss, horario_id || null, id]);
+                    UPDATE empleados SET ${setClause}
+                    WHERE usuario_id = $${paramsEmp.length}
+                `, paramsEmp);
+
 
                 // Sincronizar departamentos si se proporcionaron
                 if (departamentos_ids !== undefined) {
@@ -896,8 +901,8 @@ export async function getUsuarioByUsername(req, res) {
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
             LEFT JOIN empresas emp ON emp.id = u.empresa_id
-            WHERE u.usuario = $1
-        `, [username]);
+            WHERE u.usuario = $1 AND u.empresa_id = $2
+        `, [username, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

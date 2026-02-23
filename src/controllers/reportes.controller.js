@@ -32,9 +32,9 @@ export async function getEstadisticasGlobales(req, res) {
         const asistencias = await pool.query(`
             SELECT
                 COUNT(*) FILTER (WHERE estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE estado = 'retardo') as retardos,
-                COUNT(*) FILTER (WHERE estado = 'falta') as faltas,
-                COUNT(*) FILTER (WHERE estado IN ('puntual', 'retardo', 'falta')) as total
+                COUNT(*) FILTER (WHERE estado IN ('retardo','retardo_a','retardo_b')) as retardos,
+                COUNT(*) FILTER (WHERE estado IN ('falta','falta_por_retardo')) as faltas,
+                COUNT(*) FILTER (WHERE estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')) as total
             FROM asistencias a
             WHERE a.empresa_id = $1 ${whereAsistencias ? 'AND ' + whereAsistencias.replace('WHERE ', '') : ''}
         `, [req.empresa_id, ...paramsAsistencias]);
@@ -99,10 +99,12 @@ export async function getEstadisticasEmpleado(req, res) {
 
         const asistencias = await pool.query(`
             SELECT
-                COUNT(*) FILTER (WHERE estado IN ('puntual', 'retardo', 'falta')) as total,
+                COUNT(*) FILTER (WHERE estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')) as total,
                 COUNT(*) FILTER (WHERE estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE estado = 'retardo') as retardos,
-                COUNT(*) FILTER (WHERE estado = 'falta') as faltas
+                COUNT(*) FILTER (WHERE estado IN ('retardo','retardo_a','retardo_b')) as retardos,
+                COUNT(*) FILTER (WHERE estado = 'retardo_a') as retardos_a,
+                COUNT(*) FILTER (WHERE estado = 'retardo_b') as retardos_b,
+                COUNT(*) FILTER (WHERE estado IN ('falta','falta_por_retardo')) as faltas
             FROM asistencias
             WHERE empresa_id = (SELECT empresa_id FROM usuarios u INNER JOIN empleados e ON e.usuario_id = u.id WHERE e.id = $1 LIMIT 1)
             AND ${whereAsistencias.replace('WHERE ', '')}
@@ -152,9 +154,9 @@ export async function getEstadisticasDepartamento(req, res) {
         const asistencias = await pool.query(`
             SELECT
                 COUNT(*) FILTER (WHERE estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE estado = 'retardo') as retardos,
-                COUNT(*) FILTER (WHERE estado = 'falta') as faltas,
-                COUNT(*) FILTER (WHERE estado IN ('puntual', 'retardo', 'falta')) as total
+                COUNT(*) FILTER (WHERE estado IN ('retardo','retardo_a','retardo_b')) as retardos,
+                COUNT(*) FILTER (WHERE estado IN ('falta','falta_por_retardo')) as faltas,
+                COUNT(*) FILTER (WHERE estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')) as total
             FROM asistencias
             ${whereAsistencias}
         `, paramsAsistencias);
@@ -318,17 +320,17 @@ export async function getReporteDesempeno(req, res) {
                 u.nombre as empleado_nombre,
                 e.rfc,
                 COUNT(*) FILTER (WHERE a.estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE a.estado = 'retardo') as retardos,
-                COUNT(*) FILTER (WHERE a.estado = 'falta') as faltas,
-                COUNT(*) FILTER (WHERE a.estado IN ('puntual', 'retardo', 'falta')) as total_registros,
+                COUNT(*) FILTER (WHERE a.estado IN ('retardo','retardo_a','retardo_b')) as retardos,
+                COUNT(*) FILTER (WHERE a.estado IN ('falta','falta_por_retardo')) as faltas,
+                COUNT(*) FILTER (WHERE a.estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')) as total_registros,
                 ROUND(
-                    (COUNT(*) FILTER (WHERE a.estado = 'puntual')::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual', 'retardo', 'falta')),0) * 100), 2
+                    (COUNT(*) FILTER (WHERE a.estado = 'puntual')::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')),0) * 100), 2
                 ) as porcentaje_puntualidad,
                 ROUND(
-                    (COUNT(*) FILTER (WHERE a.estado = 'retardo')::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual', 'retardo', 'falta')),0) * 100), 2
+                    (COUNT(*) FILTER (WHERE a.estado IN ('retardo','retardo_a','retardo_b'))::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')),0) * 100), 2
                 ) as porcentaje_retardos,
                 ROUND(
-                    (COUNT(*) FILTER (WHERE a.estado = 'falta')::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual', 'retardo', 'falta')),0) * 100), 2
+                    (COUNT(*) FILTER (WHERE a.estado IN ('falta','falta_por_retardo'))::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')),0) * 100), 2
                 ) as porcentaje_faltas
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
@@ -372,12 +374,12 @@ export async function getComparativaDepartamentos(req, res) {
             SELECT
                 d.id,
                 d.nombre,
-                COUNT(*) FILTER (WHERE a.estado IN ('puntual', 'retardo', 'falta')) as total_registros,
+                COUNT(*) FILTER (WHERE a.estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')) as total_registros,
                 COUNT(*) FILTER (WHERE a.estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE a.estado = 'retardo') as retardos,
-                COUNT(*) FILTER (WHERE a.estado = 'falta') as faltas,
+                COUNT(*) FILTER (WHERE a.estado IN ('retardo','retardo_a','retardo_b')) as retardos,
+                COUNT(*) FILTER (WHERE a.estado IN ('falta','falta_por_retardo')) as faltas,
                 ROUND(
-                    (COUNT(*) FILTER (WHERE a.estado = 'puntual')::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual', 'retardo', 'falta')),0) * 100), 1
+                    (COUNT(*) FILTER (WHERE a.estado = 'puntual')::decimal / NULLIF(COUNT(*) FILTER (WHERE a.estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')),0) * 100), 1
                 ) as eficiencia
             FROM departamentos d
             LEFT JOIN asistencias a ON a.departamento_id = d.id ${whereFechas}
@@ -394,5 +396,155 @@ export async function getComparativaDepartamentos(req, res) {
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Error al obtener comparativa de departamentos' });
+    }
+}
+
+/* ============================================================
+   REPORTE DE CHECADAS POR QUINCENA (Formato RRHH TecNM)
+   GET /api/reportes/checadas/quincena
+   Query params: empleado_id, fecha_inicio, fecha_fin
+============================================================ */
+export async function getReporteChecadasQuincena(req, res) {
+    try {
+        const { empleado_id, fecha_inicio, fecha_fin } = req.query;
+
+        if (!empleado_id || !fecha_inicio || !fecha_fin) {
+            return res.status(400).json({
+                success: false,
+                message: 'Se requieren empleado_id, fecha_inicio y fecha_fin'
+            });
+        }
+
+        // Datos del empleado
+        const empRes = await pool.query(`
+            SELECT e.id, u.nombre, e.rfc, e.nss, e.horario_id, h.configuracion
+            FROM empleados e
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            LEFT JOIN horarios h ON h.id = e.horario_id
+            WHERE e.id = $1 AND u.empresa_id = $2
+        `, [empleado_id, req.empresa_id]);
+
+        if (empRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+        }
+
+        const empleado = empRes.rows[0];
+        const horarioConfig = empleado.configuracion
+            ? (typeof empleado.configuracion === 'string' ? JSON.parse(empleado.configuracion) : empleado.configuracion)
+            : null;
+
+        // Asistencias del período
+        const asistRes = await pool.query(`
+            SELECT id, tipo, estado, fecha_registro, dispositivo_origen
+            FROM asistencias
+            WHERE empleado_id = $1
+              AND fecha_registro::date BETWEEN $2 AND $3
+            ORDER BY fecha_registro ASC
+        `, [empleado_id, fecha_inicio, fecha_fin]);
+
+        // Agrupar asistencias por fecha
+        const porFecha = {};
+        for (const reg of asistRes.rows) {
+            const fecha = reg.fecha_registro.toISOString().split('T')[0];
+            if (!porFecha[fecha]) porFecha[fecha] = [];
+            porFecha[fecha].push(reg);
+        }
+
+        // Construir días del período
+        const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+        const inicio = new Date(fecha_inicio + 'T00:00:00');
+        const fin = new Date(fecha_fin + 'T23:59:59');
+        const dias = [];
+
+        for (let d = new Date(inicio); d <= fin; d.setDate(d.getDate() + 1)) {
+            const fechaStr = d.toISOString().split('T')[0];
+            const diaSemana = diasSemana[d.getDay()];
+            const registrosDia = porFecha[fechaStr] || [];
+
+            // Obtener turnos del horario para ese día
+            let turnosDia = [];
+            if (horarioConfig?.configuracion_semanal?.[diaSemana]) {
+                turnosDia = horarioConfig.configuracion_semanal[diaSemana].map(t => ({
+                    entrada: t.inicio,
+                    salida: t.fin
+                }));
+            } else if (horarioConfig?.dias?.includes(diaSemana)) {
+                turnosDia = (horarioConfig.turnos || []).map(t => ({
+                    entrada: t.entrada || t.inicio,
+                    salida: t.salida || t.fin
+                }));
+            }
+
+            const aplica = turnosDia.length > 0;
+
+            // Parear entradas/salidas por turno
+            const turnos = [];
+            const entradas = registrosDia.filter(r => r.tipo === 'entrada');
+            const salidas = registrosDia.filter(r => r.tipo === 'salida');
+
+            const maxTurnos = Math.max(turnosDia.length, Math.ceil(registrosDia.length / 2));
+            for (let t = 0; t < maxTurnos; t++) {
+                const horarioTurno = turnosDia[t] || null;
+                const checadaEntrada = entradas[t] || null;
+                const checadaSalida = salidas[t] || null;
+
+                const formatHora = (fecha) => {
+                    if (!fecha) return null;
+                    const f = new Date(fecha);
+                    return `${String(f.getHours()).padStart(2, '0')}:${String(f.getMinutes()).padStart(2, '0')}`;
+                };
+
+                turnos.push({
+                    turno: t + 1,
+                    entrada: {
+                        horario: horarioTurno?.entrada || null,
+                        checada: formatHora(checadaEntrada?.fecha_registro),
+                        estado: checadaEntrada?.estado || null
+                    },
+                    salida: {
+                        horario: horarioTurno?.salida || null,
+                        checada: formatHora(checadaSalida?.fecha_registro),
+                        estado: checadaSalida?.estado || null
+                    }
+                });
+            }
+
+            dias.push({
+                fecha: fechaStr,
+                dia_semana: diaSemana,
+                aplica,
+                turnos: aplica ? turnos : []
+            });
+        }
+
+        // Calcular número de quincena (1 o 2) y número de quincena del año
+        const mesInicio = inicio.getMonth() + 1;
+        const diaInicio = inicio.getDate();
+        const numQuincena = diaInicio <= 15 ? (mesInicio * 2) - 1 : mesInicio * 2;
+
+        res.json({
+            success: true,
+            data: {
+                empleado: {
+                    id: empleado.id,
+                    nombre: empleado.nombre,
+                    rfc: empleado.rfc,
+                    nss: empleado.nss
+                },
+                quincena: numQuincena,
+                periodo: { inicio: fecha_inicio, fin: fecha_fin },
+                dias,
+                resumen: {
+                    total_retardos_a: asistRes.rows.filter(r => r.estado === 'retardo_a').length,
+                    total_retardos_b: asistRes.rows.filter(r => r.estado === 'retardo_b').length,
+                    total_faltas: asistRes.rows.filter(r => ['falta', 'falta_por_retardo'].includes(r.estado) && r.tipo === 'entrada').length,
+                    total_puntuales: asistRes.rows.filter(r => r.estado === 'puntual').length
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en getReporteChecadasQuincena:', error);
+        res.status(500).json({ success: false, message: 'Error al generar reporte de quincena' });
     }
 }

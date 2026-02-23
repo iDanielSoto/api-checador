@@ -2,6 +2,7 @@ import 'express-async-errors'; // Importar al inicio
 import express from 'express';
 import cors from 'cors';
 import { errorHandler } from './middleware/error.middleware.js'; // Importar middleware de errores
+import { requestContext } from './utils/context.js';
 
 // Rutas
 import authRoutes from './routes/auth.routes.js';
@@ -34,6 +35,11 @@ import saasRoutes from './routes/saas.routes.js';
 const app = express();
 
 app.set('trust proxy', true);
+
+app.use((req, res, next) => {
+    requestContext.run(new Map(), next);
+});
+
 app.use(cors({
     origin: "*",
     credentials: true,

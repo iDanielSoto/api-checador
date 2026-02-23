@@ -627,7 +627,7 @@ export async function registrarAsistenciaManual(req, res) {
             hora_salida, // HH:MM
             usar_horario, // boolean
             motivo,
-            admin_id // ID del usuario que registra (opcional si viene de req.usuario)
+            admin_id
         } = req.body;
 
         if (!empleado_id || !fecha) {
@@ -637,48 +637,36 @@ export async function registrarAsistenciaManual(req, res) {
             });
         }
 
-
-        // Validar fecha futura
-        const fechaRegistro = new Date(fecha);
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        // Ajuste de zona horaria simple si es necesario, pero asumiendo fechas string YYYY-MM-DD
-        const fechaRegistroDia = new Date(fechaRegistro.toISOString().split('T')[0]);
-        const hoyDia = new Date(hoy.toISOString().split('T')[0]);
-
-        if (fechaRegistroDia > hoyDia) {
-            await client.query('ROLLBACK');
+        // ── Validar fecha futura (comparar strings YYYY-MM-DD, sin Date UTC) ──
+        const hoyStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD en zona local
+        if (fecha > hoyStr) {
             return res.status(400).json({
                 success: false,
                 message: 'No se pueden registrar asistencias en fechas futuras'
             });
         }
 
-        // Validar duplicados
-        const duplicado = await client.query(
-            'SELECT id FROM asistencias WHERE empleado_id = $1 AND fecha_registro::date = $2 LIMIT 1',
-            [empleado_id, fecha]
-        );
-
-        if (duplicado.rows.length > 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({
-                success: false,
-                message: 'Ya existe un registro de asistencia para este empleado en la fecha seleccionada'
-            });
-        }
-
-        // Iniciar transacción
+        // ── Iniciar transacción ANTES de cualquier consulta ──
         await client.query('BEGIN');
 
-        // Obtener datos del empleado
+        // (la validación de duplicados se mueve después de calcular la hora de entrada)
+
+        // ── Obtener datos del empleado + departamento + tolerancia ──
         const empleadoQuery = await client.query(`
-            SELECT e.id, u.nombre, e.horario_id, h.configuracion
+            SELECT e.id, u.nombre, u.empresa_id, e.horario_id, h.configuracion,
+                   ed.departamento_id,
+                   t.minutos_retardo, t.minutos_retardo_a_max, t.minutos_retardo_b_max, t.minutos_falta
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN horarios h ON h.id = e.horario_id
+            LEFT JOIN empleados_departamentos ed ON ed.empleado_id = e.id AND ed.es_activo = true
+            LEFT JOIN usuarios_roles ur ON ur.usuario_id = u.id AND ur.es_activo = true
+            LEFT JOIN roles r ON r.id = ur.rol_id
+            LEFT JOIN tolerancias t ON t.id = r.tolerancia_id
             WHERE e.id = $1
-                `, [empleado_id]);
+            ORDER BY r.posicion DESC
+            LIMIT 1
+        `, [empleado_id]);
 
         if (empleadoQuery.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -686,12 +674,15 @@ export async function registrarAsistenciaManual(req, res) {
         }
 
         const empleado = empleadoQuery.rows[0];
+        const empresaId = empleado.empresa_id;
+        const deptoId = empleado.departamento_id || null;
         let entradaFinal = hora_entrada;
         let salidaFinal = hora_salida;
+        let horaHorarioEntrada = null; // Para calcular el estado
 
-        // Si usa horario, obtener horas del horario
+        // ── Si usa horario, obtener horas del día correspondiente ──
         if (usar_horario) {
-            const fechaObj = new Date(`${fecha} T00:00:00`);
+            const fechaObj = new Date(`${fecha}T12:00:00`); // Mediodía para evitar desfase UTC
             const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
             const diaSemana = diasSemana[fechaObj.getDay()];
 
@@ -702,13 +693,11 @@ export async function registrarAsistenciaManual(req, res) {
                     : empleado.configuracion;
 
                 if (config.configuracion_semanal && config.configuracion_semanal[diaSemana]) {
-                    // Tomar el primer turno por defecto si hay múltiples
                     const turnos = config.configuracion_semanal[diaSemana];
                     if (turnos && turnos.length > 0) {
                         horarioEncontrado = turnos[0];
                     }
                 } else if (config.dias && config.dias.includes(diaSemana)) {
-                    // Configuración simple
                     if (config.turnos && config.turnos.length > 0) {
                         horarioEncontrado = config.turnos[0];
                     }
@@ -719,12 +708,34 @@ export async function registrarAsistenciaManual(req, res) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({
                     success: false,
-                    message: `No se encontró horario configurado para el día ${diaSemana} `
+                    message: `No se encontró horario configurado para el día ${diaSemana}`
                 });
             }
 
             entradaFinal = horarioEncontrado.inicio || horarioEncontrado.entrada;
             salidaFinal = horarioEncontrado.fin || horarioEncontrado.salida;
+            horaHorarioEntrada = entradaFinal;
+        }
+
+        // ── Validar duplicados por turno (no por fecha completa) ──
+        // Un día puede tener múltiples turnos, así que verificamos si ya existe
+        // una entrada cuya hora esté cerca de la hora de este turno (±60 min)
+        const fechaEntradaCheck = `${fecha} ${entradaFinal}:00`;
+        const duplicado = await client.query(`
+            SELECT id FROM asistencias
+            WHERE empleado_id = $1
+              AND tipo = 'entrada'
+              AND fecha_registro::date = $2
+              AND ABS(EXTRACT(EPOCH FROM (fecha_registro::time - $3::time)) / 60) < 60
+            LIMIT 1
+        `, [empleado_id, fecha, `${entradaFinal}:00`]);
+
+        if (duplicado.rows.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: `Ya existe un registro de entrada para este turno (${entradaFinal}) en ${fecha}`
+            });
         }
 
         if (!entradaFinal || !salidaFinal) {
@@ -735,28 +746,75 @@ export async function registrarAsistenciaManual(req, res) {
             });
         }
 
-        // Crear timestamps completos
-        const fechaEntrada = `${fecha} ${entradaFinal}:00`; // YYYY-MM-DD HH:MM:00
+        // ── Calcular estado real basado en la hora del horario ──
+        let estadoEntrada = 'puntual';
+
+        // Si NO usa horario (horas manuales), intentar obtener horario para clasificar
+        if (!usar_horario && !horaHorarioEntrada) {
+            // Buscar la hora programada del horario para ese día
+            const fechaObj = new Date(`${fecha}T12:00:00`);
+            const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+            const diaSemana = diasSemana[fechaObj.getDay()];
+
+            if (empleado.configuracion) {
+                const config = typeof empleado.configuracion === 'string'
+                    ? JSON.parse(empleado.configuracion)
+                    : empleado.configuracion;
+
+                if (config.configuracion_semanal && config.configuracion_semanal[diaSemana]) {
+                    const turnos = config.configuracion_semanal[diaSemana];
+                    if (turnos && turnos.length > 0) {
+                        horaHorarioEntrada = turnos[0].inicio || turnos[0].entrada;
+                    }
+                } else if (config.dias && config.dias.includes(diaSemana) && config.turnos?.length > 0) {
+                    horaHorarioEntrada = config.turnos[0].inicio || config.turnos[0].entrada;
+                }
+            }
+        }
+
+        // Clasificar solo si tenemos el horario de referencia y tolerancia
+        if (horaHorarioEntrada && empleado.minutos_retardo != null) {
+            const [hE, mE] = entradaFinal.split(':').map(Number);
+            const [hH, mH] = horaHorarioEntrada.split(':').map(Number);
+            const minutosTarde = (hE * 60 + mE) - (hH * 60 + mH);
+
+            const tolRetardo = empleado.minutos_retardo || 10;
+            const tolA = empleado.minutos_retardo_a_max || 20;
+            const tolB = empleado.minutos_retardo_b_max || 29;
+            const tolFalta = empleado.minutos_falta || 30;
+
+            if (minutosTarde <= tolRetardo) {
+                estadoEntrada = 'puntual';
+            } else if (minutosTarde <= tolA) {
+                estadoEntrada = 'retardo_a';
+            } else if (minutosTarde <= tolB) {
+                estadoEntrada = 'retardo_b';
+            } else {
+                estadoEntrada = 'falta';
+            }
+        }
+
+        // ── Crear timestamps completos ──
+        const fechaEntrada = `${fecha} ${entradaFinal}:00`;
         const fechaSalida = `${fecha} ${salidaFinal}:00`;
 
-        // Insertar Entrada
+        // ── Insertar Entrada (con empresa_id y departamento_id) ──
         const idEntrada = await generateId(ID_PREFIXES.ASISTENCIA);
-
         await client.query(`
-            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, tipo, ubicacion)
-            VALUES($1, 'puntual', 'manual', $2, $3, 'entrada', '{"Registro Manual Admin"}')
-                `, [idEntrada, fechaEntrada, empleado_id]);
+            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion)
+            VALUES($1, $2, 'manual', $3, $4, $5, 'entrada', $6, '{"Registro Manual Admin"}')
+        `, [idEntrada, estadoEntrada, fechaEntrada, empleado_id, deptoId, empresaId]);
 
-        // Insertar Salida
+        // ── Insertar Salida ──
         const idSalida = await generateId(ID_PREFIXES.ASISTENCIA);
         await client.query(`
-            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, tipo, ubicacion)
-            VALUES($1, 'salida_puntual', 'manual', $2, $3, 'salida', '{"Registro Manual Admin"}')
-                `, [idSalida, fechaSalida, empleado_id]);
+            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion)
+            VALUES($1, 'salida_puntual', 'manual', $2, $3, $4, 'salida', $5, '{"Registro Manual Admin"}')
+        `, [idSalida, fechaSalida, empleado_id, deptoId, empresaId]);
 
-        // Insertar Evento de Alta Prioridad
+        // ── Insertar Evento ──
         const idEvento = await generateId(ID_PREFIXES.EVENTO);
-        const usuarioModificadorId = req.usuario?.id || admin_id; // Priorizar usuario autenticado
+        const usuarioModificadorId = req.usuario?.id || admin_id;
 
         await client.query(`
             INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
@@ -764,12 +822,13 @@ export async function registrarAsistenciaManual(req, res) {
         `, [
             idEvento,
             'Asistencia Manual Registrada',
-            `Se registró asistencia manual completa para ${empleado.nombre} el día ${fecha}.Motivo: ${motivo || 'Sin motivo'} `,
+            `Se registró asistencia manual para ${empleado.nombre} el día ${fecha}. Estado: ${estadoEntrada}. Motivo: ${motivo || 'Sin motivo'}`,
             empleado_id,
             JSON.stringify({
                 fecha,
                 entrada: entradaFinal,
                 salida: salidaFinal,
+                estado: estadoEntrada,
                 registrado_por: usuarioModificadorId,
                 usuario_modificador_id: usuarioModificadorId,
                 motivo
@@ -778,21 +837,21 @@ export async function registrarAsistenciaManual(req, res) {
 
         await client.query('COMMIT');
 
-        // Notificar SSE (opcional, fuera de tx)
+        // ── SSE ──
         broadcast('nueva-asistencia', {
             id: idEntrada,
             empleado_id,
             empleado_nombre: empleado.nombre,
-            estado: 'puntual',
+            estado: estadoEntrada,
             tipo: 'entrada',
             fecha: fechaEntrada
         });
 
         res.status(201).json({
             success: true,
-            message: 'Asistencia manual registrada correctamente',
+            message: `Asistencia registrada como ${estadoEntrada.replace('_', ' ')}`,
             data: {
-                entrada: { id: idEntrada, hora: entradaFinal },
+                entrada: { id: idEntrada, hora: entradaFinal, estado: estadoEntrada },
                 salida: { id: idSalida, hora: salidaFinal }
             }
         });
@@ -807,5 +866,96 @@ export async function registrarAsistenciaManual(req, res) {
         });
     } finally {
         client.release();
+    }
+}
+
+/**
+ * GET /api/asistencias/empleado/:empleadoId/equivalencias
+ * Calcula faltas equivalentes por acumulación de Retardo A/B en un período.
+ * 
+ * Query params:
+ *   - inicio: YYYY-MM-DD (default: primer día del mes actual)
+ *   - fin:    YYYY-MM-DD (default: hoy)
+ */
+export async function getEquivalenciasEmpleado(req, res) {
+    try {
+        const { empleadoId } = req.params;
+        const hoy = new Date();
+        const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+        const {
+            inicio = inicioMes,
+            fin = hoy.toISOString().split('T')[0]
+        } = req.query;
+
+        // Obtener tolerancia del empleado (para equivalencias configuradas)
+        const tolRes = await pool.query(`
+            SELECT t.equivalencia_retardo_a, t.equivalencia_retardo_b
+            FROM tolerancias t
+            INNER JOIN roles r ON r.tolerancia_id = t.id
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            INNER JOIN empleados e ON e.usuario_id = ur.usuario_id
+            WHERE e.id = $1 AND ur.es_activo = true
+            ORDER BY r.posicion DESC
+            LIMIT 1
+        `, [empleadoId]);
+
+        const eqA = tolRes.rows[0]?.equivalencia_retardo_a ?? 10;
+        const eqB = tolRes.rows[0]?.equivalencia_retardo_b ?? 5;
+
+        // Conteos del período
+        const statsRes = await pool.query(`
+            SELECT
+                COUNT(*) FILTER (WHERE estado = 'retardo_a')                           AS retardos_a,
+                COUNT(*) FILTER (WHERE estado = 'retardo_b')                           AS retardos_b,
+                COUNT(*) FILTER (WHERE estado IN ('falta', 'falta_por_retardo')
+                                  AND dispositivo_origen != 'sistema')                 AS faltas_directas,
+                COUNT(*) FILTER (WHERE estado IN ('falta', 'falta_por_retardo')
+                                  AND dispositivo_origen = 'sistema')                  AS faltas_por_acumulacion
+            FROM asistencias
+            WHERE empleado_id = $1
+              AND tipo = 'entrada'
+              AND fecha_registro::date BETWEEN $2 AND $3
+        `, [empleadoId, inicio, fin]);
+
+        const s = statsRes.rows[0];
+        const retA = parseInt(s.retardos_a) || 0;
+        const retB = parseInt(s.retardos_b) || 0;
+        const faltasPorA = Math.floor(retA / eqA);
+        const faltasPorB = Math.floor(retB / eqB);
+        const faltasEquivalentes = faltasPorA + faltasPorB;
+        const faltasDirectas = parseInt(s.faltas_directas) || 0;
+        const faltasTotal = faltasDirectas + faltasEquivalentes + (parseInt(s.faltas_por_acumulacion) || 0);
+
+        // Notas malas (Art. 80): 1 nota c/2 RetA, 1 nota por RetB
+        const notasMalas = Math.floor(retA / 2) + retB;
+
+        res.json({
+            success: true,
+            data: {
+                periodo: { inicio, fin },
+                retardos_a: retA,
+                retardos_b: retB,
+                faltas_directas: faltasDirectas,
+                faltas_por_acumulacion_sistema: parseInt(s.faltas_por_acumulacion) || 0,
+                faltas_equivalentes_por_retardos: faltasEquivalentes,
+                faltas_totales: faltasTotal,
+                notas_malas_acumuladas: notasMalas,
+                configuracion_equivalencias: {
+                    retardos_a_por_falta: eqA,
+                    retardos_b_por_falta: eqB,
+                    art_80a_retardos_a_por_nota: 2,
+                    art_80b_retardos_b_por_nota: 1
+                },
+                desglose_equivalencias: {
+                    faltas_por_retardos_a: faltasPorA,
+                    retardos_a_restantes: retA % eqA,
+                    faltas_por_retardos_b: faltasPorB,
+                    retardos_b_restantes: retB % eqB
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error en getEquivalenciasEmpleado:', error);
+        res.status(500).json({ success: false, message: 'Error al calcular equivalencias' });
     }
 }

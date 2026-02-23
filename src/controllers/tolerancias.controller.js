@@ -15,6 +15,10 @@ export async function getTolerancias(req, res) {
                 t.nombre,
                 t.minutos_retardo,
                 t.minutos_falta,
+                t.minutos_retardo_a_max,
+                t.minutos_retardo_b_max,
+                t.equivalencia_retardo_a,
+                t.equivalencia_retardo_b,
                 t.permite_registro_anticipado,
                 t.minutos_anticipado_max,
                 t.aplica_tolerancia_entrada,
@@ -111,12 +115,16 @@ export async function createTolerancia(req, res) {
             nombre,
             minutos_retardo = 10,
             minutos_falta = 30,
+            minutos_retardo_a_max = 20,
+            minutos_retardo_b_max = 29,
+            equivalencia_retardo_a = 10,
+            equivalencia_retardo_b = 5,
             permite_registro_anticipado = true,
             minutos_anticipado_max = 60,
             aplica_tolerancia_entrada = true,
             aplica_tolerancia_salida = false,
             dias_aplica,
-            rol_id // Si se envía, es para asignar esta tolerancia al rol
+            rol_id
         } = req.body;
 
         // Si no se envía nombre pero sí rol_id, tomar el nombre del rol
@@ -143,13 +151,17 @@ export async function createTolerancia(req, res) {
         const resultado = await client.query(`
             INSERT INTO tolerancias (
                 id, nombre, minutos_retardo, minutos_falta,
+                minutos_retardo_a_max, minutos_retardo_b_max,
+                equivalencia_retardo_a, equivalencia_retardo_b,
                 permite_registro_anticipado, minutos_anticipado_max,
                 aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica, empresa_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *
         `, [
             id, nombre, minutos_retardo, minutos_falta,
+            minutos_retardo_a_max, minutos_retardo_b_max,
+            equivalencia_retardo_a, equivalencia_retardo_b,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
             dias_aplica ? JSON.stringify(dias_aplica) : null,
@@ -199,6 +211,10 @@ export async function updateTolerancia(req, res) {
             nombre,
             minutos_retardo,
             minutos_falta,
+            minutos_retardo_a_max,
+            minutos_retardo_b_max,
+            equivalencia_retardo_a,
+            equivalencia_retardo_b,
             permite_registro_anticipado,
             minutos_anticipado_max,
             aplica_tolerancia_entrada,
@@ -217,15 +233,21 @@ export async function updateTolerancia(req, res) {
                 nombre = COALESCE($1, nombre),
                 minutos_retardo = COALESCE($2, minutos_retardo),
                 minutos_falta = COALESCE($3, minutos_falta),
-                permite_registro_anticipado = COALESCE($4, permite_registro_anticipado),
-                minutos_anticipado_max = COALESCE($5, minutos_anticipado_max),
-                aplica_tolerancia_entrada = COALESCE($6, aplica_tolerancia_entrada),
-                aplica_tolerancia_salida = COALESCE($7, aplica_tolerancia_salida),
-                dias_aplica = COALESCE($8, dias_aplica)
-            WHERE id = $9 AND empresa_id = $10
+                minutos_retardo_a_max = COALESCE($4, minutos_retardo_a_max),
+                minutos_retardo_b_max = COALESCE($5, minutos_retardo_b_max),
+                equivalencia_retardo_a = COALESCE($6, equivalencia_retardo_a),
+                equivalencia_retardo_b = COALESCE($7, equivalencia_retardo_b),
+                permite_registro_anticipado = COALESCE($8, permite_registro_anticipado),
+                minutos_anticipado_max = COALESCE($9, minutos_anticipado_max),
+                aplica_tolerancia_entrada = COALESCE($10, aplica_tolerancia_entrada),
+                aplica_tolerancia_salida = COALESCE($11, aplica_tolerancia_salida),
+                dias_aplica = COALESCE($12, dias_aplica)
+            WHERE id = $13 AND empresa_id = $14
             RETURNING *
         `, [
             nombre, minutos_retardo, minutos_falta,
+            minutos_retardo_a_max, minutos_retardo_b_max,
+            equivalencia_retardo_a, equivalencia_retardo_b,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
             diasJson, id, req.empresa_id
