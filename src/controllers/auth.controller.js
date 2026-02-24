@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { pool } from '../config/db.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
+import jwt from 'jsonwebtoken'; // para generar token con empresa_id
 
 /**
  * POST /api/auth/login
@@ -8,7 +9,8 @@ import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js'
  */
 export async function login(req, res) {
     try {
-        const { usuario, contraseña } = req.body;
+        // Se permite opcionalmente enviar empresa_id para desambiguar usuarios con mismo correo
+        const { usuario, contraseña, empresa_id: empresaIdReq } = req.body;
 
         if (!usuario || !contraseña) {
             return res.status(400).json({
@@ -17,7 +19,7 @@ export async function login(req, res) {
             });
         }
 
-        // Buscar usuario por nombre de usuario o correo
+        // Buscar usuario por nombre de usuario o correo, incluyendo nombre de empresa
         const resultado = await pool.query(`
             SELECT
                 u.id,
@@ -30,11 +32,13 @@ export async function login(req, res) {
                 u.estado_cuenta,
                 u.es_empleado,
                 u.empresa_id,
+                emp.nombre as empresa_nombre,
                 e.id as empleado_id,
                 e.rfc,
                 e.nss
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
+            LEFT JOIN empresas emp ON emp.id = u.empresa_id
             WHERE (u.usuario = $1 OR u.correo = $1)
         `, [usuario]);
 
@@ -45,7 +49,34 @@ export async function login(req, res) {
             });
         }
 
-        const usuarioData = resultado.rows[0];
+        // Si hay varios usuarios con el mismo correo, manejar multi‑tenant
+        if (resultado.rows.length > 1 && !empresaIdReq) {
+            // Devolver lista de empresas para que el cliente elija
+            const empresas = resultado.rows.map(r => ({
+                empresa_id: r.empresa_id,
+                nombre: r.empresa_nombre
+            }));
+            return res.status(300).json({
+                success: true,
+                message: 'Usuario encontrado en varias empresas',
+                empresas
+            });
+        }
+
+        // Si se envió empresa_id, filtrar la fila correspondiente
+        let usuarioData;
+        if (empresaIdReq) {
+            usuarioData = resultado.rows.find(r => r.empresa_id === empresaIdReq);
+            if (!usuarioData) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Usuario no encontrado en la empresa especificada'
+                });
+            }
+        } else {
+            // Caso único
+            usuarioData = resultado.rows[0];
+        }
 
         // Verificar estado de cuenta
         if (usuarioData.estado_cuenta !== 'activo') {
@@ -108,6 +139,19 @@ export async function login(req, res) {
             detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, empresa_id: usuarioData.empresa_id }
         });
 
+        // Generar JWT
+        const token = jwt.sign(
+            {
+                sub: usuarioData.id,
+                usuario: usuarioData.usuario,
+                empresa_id: usuarioData.empresa_id,
+                esAdmin: esAdmin,
+                roles: rolesResult.rows.map(r => r.nombre)
+            },
+            process.env.JWT_SECRET || 'default_secret',
+            { expiresIn: '24h' }
+        );
+
         res.json({
             success: true,
             message: 'Inicio de sesión exitoso',
@@ -133,9 +177,7 @@ export async function login(req, res) {
                 })),
                 permisos: permisosCombinadosBigInt.toString(),
                 esAdmin,
-                // El token es el ID del usuario (simplificado)
-                // En producción usar JWT
-                token: usuarioData.id
+                token: token
             }
         });
 
@@ -208,6 +250,20 @@ export async function impersonarEmpresa(req, res) {
             detalles: { admin_original: req.usuario.id, usuario_impersonado: usuarioData.id, empresa_id }
         });
 
+        // Generar JWT para el usuario impersonado
+        const token = jwt.sign(
+            {
+                sub: usuarioData.id,
+                usuario: usuarioData.usuario,
+                empresa_id: usuarioData.empresa_id,
+                esAdmin: esAdmin,
+                roles: rolesResult.rows.map(r => r.nombre),
+                impersonated_by: req.usuario.id // Opcional: trackear quién impersonó
+            },
+            process.env.JWT_SECRET || 'default_secret',
+            { expiresIn: '2h' } // Corta duración para seguridad
+        );
+
         res.json({
             success: true,
             message: 'Iniciando sesión como cliente',
@@ -227,7 +283,7 @@ export async function impersonarEmpresa(req, res) {
                 })),
                 permisos: permisosCombinadosBigInt.toString(),
                 esAdmin,
-                token: usuarioData.id // Token simple por ahora, igual que en login
+                token: token
             }
         });
 
@@ -557,6 +613,19 @@ export async function loginBiometrico(req, res) {
             detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, metodo: 'biometrico', empresa_id: usuarioData.empresa_id }
         });
 
+        // Generar JWT
+        const token = jwt.sign(
+            {
+                sub: usuarioData.id,
+                usuario: usuarioData.usuario,
+                empresa_id: usuarioData.empresa_id,
+                esAdmin: esAdmin,
+                roles: rolesResult.rows.map(r => r.nombre)
+            },
+            process.env.JWT_SECRET || 'default_secret',
+            { expiresIn: '24h' }
+        );
+
         res.json({
             success: true,
             message: 'Autenticación biométrica exitosa',
@@ -583,7 +652,7 @@ export async function loginBiometrico(req, res) {
                 })),
                 permisos: permisosCombinadosBigInt.toString(),
                 esAdmin,
-                token: usuarioData.id
+                token: token
             }
         });
     } catch (error) {

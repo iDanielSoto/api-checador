@@ -4,6 +4,7 @@
  */
 
 import { pool } from '../config/db.js';
+import jwt from 'jsonwebtoken';
 
 /**
  * Verifica que exista un usuario autenticado en la sesión
@@ -66,7 +67,17 @@ export async function verificarAutenticacion(req, res, next) {
 
         // ==========================================
         // Detección de Usuario Regular (Multi-Tenant)
+        // Soporta JWT (nuevo) y userId directo (legacy)
         // ==========================================
+        let userId = token;
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret');
+            userId = decoded.sub;
+        } catch (jwtErr) {
+            // No es JWT, usar token como userId directo (legacy)
+            userId = token;
+        }
+
         const resultado = await pool.query(`
             SELECT
                 u.id,
@@ -81,7 +92,7 @@ export async function verificarAutenticacion(req, res, next) {
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
             WHERE u.id = $1 AND u.estado_cuenta = 'activo'
-        `, [token]);
+        `, [userId]);
 
         if (resultado.rows.length === 0) {
             return res.status(401).json({
@@ -104,7 +115,7 @@ export async function verificarAutenticacion(req, res, next) {
             INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
             WHERE ur.usuario_id = $1 AND ur.es_activo = true
             ORDER BY r.posicion ASC
-        `, [token]);
+        `, [userId]);
 
         // Combinar permisos de todos los roles
         let permisosCombinadosBigInt = BigInt(0);
@@ -128,6 +139,7 @@ export async function verificarAutenticacion(req, res, next) {
             permisosBigInt: permisosCombinadosBigInt,
             esAdmin
         };
+        req.empresa_id = resultado.rows[0].empresa_id;
 
         next();
     } catch (error) {
@@ -159,6 +171,14 @@ export async function autenticacionOpcional(req, res, next) {
             return next();
         }
 
+        let userId = token;
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret');
+            userId = decoded.sub;
+        } catch (jwtErr) {
+            userId = token;
+        }
+
         const resultado = await pool.query(`
             SELECT
                 u.id,
@@ -167,11 +187,12 @@ export async function autenticacionOpcional(req, res, next) {
                 u.nombre,
                 u.estado_cuenta,
                 u.es_empleado,
+                u.empresa_id,
                 e.id as empleado_id
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
             WHERE u.id = $1 AND u.estado_cuenta = 'activo'
-        `, [token]);
+        `, [userId]);
 
         if (resultado.rows.length > 0) {
             const rolesResult = await pool.query(`
@@ -179,7 +200,7 @@ export async function autenticacionOpcional(req, res, next) {
                 FROM roles r
                 INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
                 WHERE ur.usuario_id = $1 AND ur.es_activo = true
-            `, [token]);
+            `, [userId]);
 
             let permisosCombinadosBigInt = BigInt(0);
             for (const rol of rolesResult.rows) {
@@ -194,6 +215,7 @@ export async function autenticacionOpcional(req, res, next) {
                 permisos: permisosCombinadosBigInt.toString(),
                 permisosBigInt: permisosCombinadosBigInt
             };
+            req.empresa_id = resultado.rows[0].empresa_id;
         } else {
             req.usuario = null;
         }
