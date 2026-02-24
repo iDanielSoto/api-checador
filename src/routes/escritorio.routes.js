@@ -5,17 +5,13 @@ import {
     createEscritorio,
     updateEscritorio,
     deleteEscritorio,
-    reactivarEscritorio,
-    desvincularEscritorioLocal
+    reactivarEscritorio
 } from '../controllers/escritorio.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
-
-// Ruta pública para desvinculación local (usa token de solicitud, no requiere JWT admin)
-router.post('/:id/desvincular', desvincularEscritorioLocal);
 
 router.use(verificarAutenticacion);
 router.use(verificarEmpresa);
