@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { getEmpresas, getEmpresaById, createEmpresa, updateEmpresa, deleteEmpresa, getEmpresaPublicaById, getMiEmpresa, updateMiEmpresa } from '../controllers/empresas.controller.js';
+import { getEmpresas, getEmpresaById, createEmpresa, updateEmpresa, deleteEmpresa, getEmpresaPublicaById, getEmpresaPublicaByIdentificador, getMiEmpresa, updateMiEmpresa } from '../controllers/empresas.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { verificarEmpresa, requireSaaSOwner } from '../middleware/tenant.middleware.js';
 
 const router = Router();
-// Ruta pública para listar info basica de una empresa (necesaria para el login multi-tenant)
+// Rutas públicas para listar info basica de una empresa (necesarias para el login multi-tenant o solicitudes externas)
 router.get('/public/:id', getEmpresaPublicaById);
+router.get('/identificador/:slug', getEmpresaPublicaByIdentificador);
 
 // Rutas para que el tenant admin gestione SU PROPIA empresa
 router.get('/mi-empresa', verificarAutenticacion, verificarEmpresa, getMiEmpresa);

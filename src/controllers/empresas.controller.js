@@ -1,5 +1,5 @@
 import { pool } from '../config/db.js';
-import { generateId, generateSecurityKey, ID_PREFIXES } from '../utils/idGenerator.js';
+import { generateId, generateSecurityKey, generateCompanyIdentifier, ID_PREFIXES } from '../utils/idGenerator.js';
 import { broadcast } from '../utils/sse.js';
 
 /**
@@ -14,6 +14,7 @@ export async function getEmpresas(req, res) {
             SELECT
                 e.id,
                 e.nombre,
+                e.identificador,
                 e.logo,
                 e.telefono,
                 e.correo,
@@ -62,7 +63,7 @@ export async function getMiEmpresa(req, res) {
     try {
         const resultado = await pool.query(`
             SELECT
-                e.id, e.nombre, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
+                e.id, e.nombre, e.identificador, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
                 e.configuracion_id,
                 c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora, c.segmentos_red,
                 (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
@@ -206,16 +207,18 @@ export async function createEmpresa(req, res) {
 
         // 3. Crear empresa pública
         const empresaId = await generateId(ID_PREFIXES.EMPRESA);
+        const identificador = generateCompanyIdentifier(nombre);
+
         const resultadoEmpresa = await client.query(`
             INSERT INTO empresas (
                 id, nombre, logo, telefono, correo, es_activo, configuracion_id, 
-                limite_empleados, limite_dispositivos, fecha_vencimiento
+                limite_empleados, limite_dispositivos, fecha_vencimiento, identificador
             )
-            VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9, $10)
             RETURNING *
         `, [
             empresaId, nombre, logo, telefono, correo, configId,
-            limite_empleados, limite_dispositivos, fecha_vencimiento
+            limite_empleados, limite_dispositivos, fecha_vencimiento, identificador
         ]);
 
         // 4. Crear Credenciales del Primer Administrador de esta empresa
@@ -392,36 +395,48 @@ export async function getEmpresaPublicaById(req, res) {
 
         const resultado = await pool.query(`
             SELECT
-                e.id,
-                e.nombre,
-                e.logo,
-                e.es_activo,
-                c.idioma,
-                c.zona_horaria,
-                c.formato_fecha,
-                c.formato_hora
+                e.id, e.nombre, e.identificador, e.logo, e.es_activo,
+                c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora
             FROM empresas e
             LEFT JOIN configuraciones c ON c.id = e.configuracion_id
             WHERE e.id = $1 AND e.es_activo = true
         `, [id]);
 
         if (resultado.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Empresa no encontrada'
-            });
+            return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
         }
 
-        res.json({
-            success: true,
-            data: resultado.rows[0]
-        });
-
+        res.json({ success: true, data: resultado.rows[0] });
     } catch (error) {
         console.error('Error en getEmpresaPublicaById:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al obtener información de la empresa'
-        });
+        res.status(500).json({ success: false, message: 'Error interno' });
+    }
+}
+
+/**
+ * GET /api/empresas/identificador/:slug
+ * Obtiene información básica de una empresa por su identificador (público)
+ */
+export async function getEmpresaPublicaByIdentificador(req, res) {
+    try {
+        const { slug } = req.params;
+
+        const resultado = await pool.query(`
+            SELECT
+                e.id, e.nombre, e.identificador, e.logo, e.es_activo,
+                c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora
+            FROM empresas e
+            LEFT JOIN configuraciones c ON c.id = e.configuracion_id
+            WHERE e.identificador = $1 AND e.es_activo = true
+        `, [slug]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Empresa no encontrada por identificador' });
+        }
+
+        res.json({ success: true, data: resultado.rows[0] });
+    } catch (error) {
+        console.error('Error en getEmpresaPublicaByIdentificador:', error);
+        res.status(500).json({ success: false, message: 'Error interno' });
     }
 }

@@ -148,6 +148,7 @@ export async function createSolicitud(req, res) {
             mac,
             sistema_operativo,
             empresa_id,
+            identificador, // Aceptar identificador slug
             observaciones,
             dispositivos_temp
         } = req.body;
@@ -163,6 +164,14 @@ export async function createSolicitud(req, res) {
         }
 
         let empresaIdFinal = empresa_id;
+
+        // PRIORIDAD: Si viene identificador (slug), buscar el ID real
+        if (identificador) {
+            const resEmp = await pool.query('SELECT id FROM empresas WHERE identificador = $1', [identificador]);
+            if (resEmp.rows.length > 0) {
+                empresaIdFinal = resEmp.rows[0].id;
+            }
+        }
 
         if (!empresaIdFinal || empresaIdFinal === 'EMA00000') {
             const empresaDefault = await pool.query('SELECT id FROM empresas LIMIT 1');

@@ -131,3 +131,23 @@ export function generateToken() {
 export function generateSecurityKey() {
     return Math.floor(10000000 + Math.random() * 90000000);
 }
+
+/**
+ * Genera un identificador para la empresa
+ * Formato: nombre-empresa-3hex
+ * @param {string} nombre - Nombre de la empresa
+ * @returns {string} Identificador generado
+ */
+export function generateCompanyIdentifier(nombre) {
+    const slug = nombre
+        .toLowerCase()
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Quitar acentos
+        .replace(/[^a-z0-9]/g, '-') // Reemplazar no alfanuméricos con guion
+        .replace(/-+/g, '-') // Quitar guiones duplicados
+        .replace(/^-|-$/g, ''); // Quitar guiones al inicio o final
+
+    const hex = Math.floor(Math.random() * 4096).toString(16).toUpperCase().padStart(3, '0');
+    return `${slug}-${hex}`;
+}
