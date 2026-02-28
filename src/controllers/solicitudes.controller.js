@@ -419,11 +419,46 @@ export async function aceptarSolicitud(req, res) {
                 });
             }
 
-            dispositivo_id = await generateId(ID_PREFIXES.MOVIL);
-            await client.query(`
-                INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id, ip, mac, empresa_id)
-                VALUES ($1, $2, false, true, $3, $4, $5, $6)
-            `, [dispositivo_id, sol.sistema_operativo, empleado_id, sol.ip, sol.mac, sol.empresa_id]);
+            // Buscar si ya existe un móvil para este empleado o con esta MAC
+            let movilExistente = null;
+
+            if (sol.mac) {
+                const macSearch = await client.query(
+                    "SELECT id FROM movil WHERE mac = $1 LIMIT 1",
+                    [sol.mac]
+                );
+                if (macSearch.rows.length > 0) movilExistente = macSearch.rows[0];
+            }
+
+            if (!movilExistente) {
+                const empleadoSearch = await client.query(
+                    "SELECT id FROM movil WHERE empleado_id = $1 LIMIT 1",
+                    [empleado_id]
+                );
+                if (empleadoSearch.rows.length > 0) movilExistente = empleadoSearch.rows[0];
+            }
+
+            if (movilExistente) {
+                // Reactivar y actualizar los datos del dispositivo existente
+                dispositivo_id = movilExistente.id;
+                await client.query(`
+                    UPDATE movil SET 
+                        sistema_operativo = $2,
+                        empleado_id = $3,
+                        ip = $4,
+                        mac = COALESCE($5, mac),
+                        es_activo = true,
+                        empresa_id = $6
+                    WHERE id = $1
+                `, [dispositivo_id, sol.sistema_operativo, empleado_id, sol.ip, sol.mac, sol.empresa_id]);
+            } else {
+                // Crear el dispositivo móvil nuevo
+                dispositivo_id = await generateId(ID_PREFIXES.MOVIL);
+                await client.query(`
+                    INSERT INTO movil (id, sistema_operativo, es_root, es_activo, empleado_id, ip, mac, empresa_id)
+                    VALUES ($1, $2, false, true, $3, $4, $5, $6)
+                `, [dispositivo_id, sol.sistema_operativo, empleado_id, sol.ip, sol.mac, sol.empresa_id]);
+            }
         }
 
         await client.query(`
