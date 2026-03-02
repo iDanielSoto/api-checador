@@ -2,180 +2,454 @@ import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { broadcast } from '../utils/sse.js';
 
-import {
-    srvBuscarConfiguracion,
-    srvObtenerTurnosDeHoy,
-    srvBuscarBloqueActual,
-    srvDentroDeTurnoVisual,
-    srvVerificarLongitudYTipo,
-    srvValidarZonaYRed,
-    srvEvaluarEstado,
-    srvAumentarConteo
-} from '../services/asistencias.service.js';
+const MINUTOS_NUEVO_TURNO_UMBRAL = 120; // 2 horas (120 minutos)
+
+function agruparTurnosConcatenados(turnos) {
+    if (!turnos || turnos.length === 0) {
+        return [];
+    }
+    if (turnos.length === 1) {
+        return [turnos];
+    }
+    const grupos = [];
+    let grupoActual = [turnos[0]];
+    for (let i = 1; i < turnos.length; i++) {
+        const turnoAnterior = grupoActual[grupoActual.length - 1];
+        const turnoActual = turnos[i];
+        const [hSalida, mSalida] = turnoAnterior.salida.split(':').map(Number);
+        const minutosSalida = hSalida * 60 + mSalida;
+        const [hEntrada, mEntrada] = turnoActual.entrada.split(':').map(Number);
+        const minutosEntrada = hEntrada * 60 + mEntrada;
+        const diferencia = minutosEntrada - minutosSalida;
+
+        // Bloques de tiempo menores a 2 horas (120 min) = mismo turno
+        if (diferencia < MINUTOS_NUEVO_TURNO_UMBRAL) {
+            grupoActual.push(turnoActual);
+        } else {
+            grupos.push(grupoActual);
+            grupoActual = [turnoActual];
+        }
+    }
+    grupos.push(grupoActual);
+    return grupos;
+}
+
+function getEntradaSalidaGrupo(grupo) {
+    if (!grupo || grupo.length === 0) {
+        return { entrada: '00:00', salida: '00:00' };
+    }
+    return {
+        entrada: grupo[0].entrada,
+        salida: grupo[grupo.length - 1].salida
+    };
+}
+
+/**
+ * Identifica el bloque de horario correspondiente a la hora actual
+ */
+function identificarBloqueHorario(gruposTurnos, horaActual, tolerancia) {
+    const margenAnticipado = tolerancia?.minutos_anticipado_max || 60;
+    const margenFalta = tolerancia?.minutos_falta || 30;
+    for (let i = 0; i < gruposTurnos.length; i++) {
+        const { entrada, salida } = getEntradaSalidaGrupo(gruposTurnos[i]);
+        const [hE, mE] = entrada.split(':').map(Number);
+        const [hS, mS] = salida.split(':').map(Number);
+        const inicioBloque = hE * 60 + mE - margenAnticipado;
+        const finBloque = hS * 60 + mS + margenFalta;
+        if (horaActual >= inicioBloque && horaActual <= finBloque) {
+            return { indice: i, entrada, salida, inicioBloque, finBloque };
+        }
+    }
+    return null;
+}
+
+/**
+ * Verifica si un bloque ya tiene entrada y salida registradas
+ */
+function bloqueCompletado(registrosHoy, bloque) {
+    if (!registrosHoy || registrosHoy.length === 0 || !bloque) return false;
+    // Filtrar registros dentro del rango del bloque
+    const registrosEnBloque = registrosHoy.filter(reg => {
+        const fecha = new Date(reg.fecha_registro);
+        const minutos = fecha.getHours() * 60 + fecha.getMinutes();
+        return minutos >= bloque.inicioBloque && minutos <= bloque.finBloque;
+    });
+    // Necesita al menos 2 registros (1 entrada + 1 salida) para estar completo
+    const totalRegistros = registrosEnBloque.length;
+    console.log(`[bloqueCompletado] Bloque ${bloque.entrada}-${bloque.salida}: registros=${totalRegistros}`);
+    return totalRegistros >= 2;
+}
+
+function calcularEstadoEntrada(turno, horaActual, tolerancia) {
+    const [horaEntrada, minEntrada] = turno.entrada.split(':').map(Number);
+    const minEntradaTurno = horaEntrada * 60 + minEntrada;
+    const minutosAnticipado = tolerancia.minutos_anticipado_max || 60;
+    const inicioVentana = minEntradaTurno - minutosAnticipado;
+
+    // Lógica dinámica usando reglas JSON
+    const minutosTarde = horaActual - minEntradaTurno;
+
+    if (horaActual < inicioVentana) {
+        return 'falta'; // Si llega antes de la ventana, actualmente cuenta como falta
+    }
+
+    // Ordenar reglas por límite de minutos ascendente
+    let reglas = [];
+    if (tolerancia && tolerancia.reglas) {
+        reglas = typeof tolerancia.reglas === 'string' ? JSON.parse(tolerancia.reglas) : tolerancia.reglas;
+        reglas.sort((a, b) => a.limite_minutos - b.limite_minutos);
+    }
+
+    if (reglas.length > 0) {
+        for (const regla of reglas) {
+            if (minutosTarde <= regla.limite_minutos) {
+                return regla.id;
+            }
+        }
+    } else {
+        // Fallback porsiaca si no hay reglas estructuradas
+        const margenPuntual = minEntradaTurno + 10;
+        const margenRetardoA = minEntradaTurno + 20;
+        const margenRetardoB = minEntradaTurno + 29;
+
+        if (horaActual >= inicioVentana && horaActual <= margenPuntual) return 'puntual';
+        if (horaActual > margenPuntual && horaActual <= margenRetardoA) return 'retardo_a';
+        if (horaActual > margenRetardoA && horaActual <= margenRetardoB) return 'retardo_b';
+    }
+
+    const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
+    const minSalidaTurno = horaSalida * 60 + minSalida;
+
+    // Si pasaron todos los límites pero todavía es turno
+    if (horaActual <= minSalidaTurno) {
+        return 'falta_por_retardo';
+    }
+
+    return 'falta';
+}
+
+function calcularEstadoSalida(turno, horaActual, tolerancia) {
+    const minutosTolerancia = tolerancia.aplica_tolerancia_salida
+        ? (tolerancia.minutos_retardo || 10)
+        : 10;
+    const [horaSalida, minSalida] = turno.salida.split(':').map(Number);
+    const minSalidaTurno = horaSalida * 60 + minSalida;
+    const inicioVentanaSalida = minSalidaTurno - minutosTolerancia;
+    if (horaActual >= inicioVentanaSalida && horaActual <= minSalidaTurno + 5) {
+        return 'salida_puntual';
+    }
+    if (horaActual < inicioVentanaSalida) {
+        return 'salida_temprano';
+    }
+    return 'salida_puntual';
+}
+
+function calcularEstadoAsistencia(configuracionHorario, ahora, tolerancia, esEntrada, totalRegistrosHoy = 0) {
+    try {
+        if (!configuracionHorario) {
+            return esEntrada ? 'puntual' : 'salida_puntual';
+        }
+        const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+        const diaSemana = diasSemana[ahora.getDay()];
+        let config = typeof configuracionHorario === 'string'
+            ? JSON.parse(configuracionHorario)
+            : configuracionHorario;
+        let turnosHoy = [];
+        if (config.configuracion_semanal && config.configuracion_semanal[diaSemana]) {
+            turnosHoy = config.configuracion_semanal[diaSemana].map(t => ({
+                entrada: t.inicio,
+                salida: t.fin
+            }));
+        } else if (config.dias && config.dias.includes(diaSemana)) {
+            turnosHoy = config.turnos || [];
+        }
+        if (turnosHoy.length === 0) {
+            return esEntrada ? 'puntual' : 'salida_puntual';
+        }
+        const gruposTurnos = agruparTurnosConcatenados(turnosHoy);
+        const horaActual = ahora.getHours() * 60 + ahora.getMinutes();
+        if (esEntrada) {
+            const numeroGrupo = Math.floor(totalRegistrosHoy / 2);
+            if (numeroGrupo >= gruposTurnos.length) {
+                return 'puntual';
+            }
+            const grupoActual = gruposTurnos[numeroGrupo];
+            const { entrada, salida } = getEntradaSalidaGrupo(grupoActual);
+            return calcularEstadoEntrada(
+                { entrada, salida },
+                horaActual,
+                tolerancia
+            );
+        } else {
+            const numeroGrupo = Math.floor(totalRegistrosHoy / 2);
+            if (numeroGrupo >= gruposTurnos.length) {
+                return 'salida_puntual';
+            }
+            const grupoActual = gruposTurnos[numeroGrupo];
+            const { entrada, salida } = getEntradaSalidaGrupo(grupoActual);
+            return calcularEstadoSalida(
+                { entrada, salida },
+                horaActual,
+                tolerancia
+            );
+        }
+    } catch (error) {
+        return esEntrada ? 'puntual' : 'salida_puntual';
+    }
+}
 
 export async function registrarAsistencia(req, res) {
-    const { dispositivo_origen } = req.body;
-    if (dispositivo_origen === 'movil' || dispositivo_origen === 'app' || dispositivo_origen === 'celular') {
-        return await registrarAsistenciaMovil(req, res);
-    } else {
-        return await registrarAsistenciaEscritorio(req, res);
-    }
-}
-
-async function registrarAsistenciaMovil(req, res) {
     try {
-        const { empleado_id, dispositivo_origen, ubicacion, departamento_id, tipo: tipoForzado } = req.body;
+        const {
+            empleado_id,
+            dispositivo_origen,
+            ubicacion,
+            departamento_id,
+            estado: estadoRecibido,
+            tipo,
+            tipo_movimiento // Frontend escritorio puede enviar esto
+        } = req.body;
+        if (!empleado_id || !dispositivo_origen) {
+            return res.status(400).json({
+                success: false,
+                message: 'empleado_id y dispositivo_origen son requeridos'
+            });
+        }
+        const empleado = await pool.query(`
+            SELECT e.id, e.horario_id, u.nombre, h.configuracion, u.empresa_id
+            FROM empleados e
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            LEFT JOIN horarios h ON h.id = e.horario_id
+            WHERE e.id = $1 AND u.estado_cuenta = 'activo'
+    `, [empleado_id]);
+        if (empleado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Empleado no encontrado o inactivo'
+            });
+        }
+        // VALIDAR SI ES DÍA FESTIVO
+        const hoy = new Date();
+        const fechaHoy = hoy.toISOString().split('T')[0];
+        const esFestivo = await pool.query(`
+            SELECT id, nombre, tipo FROM dias_festivos 
+            WHERE fecha = $1 AND es_obligatorio = true AND es_activo = true
+        `, [fechaHoy]);
+        if (esFestivo.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Hoy es día festivo: ${esFestivo.rows[0].nombre}`,
+                es_festivo: true,
+                festivo: esFestivo.rows[0]
+            });
+        }
+        const registrosHoy = await pool.query(`
+            SELECT a.id, a.estado, a.fecha_registro, a.tipo
+            FROM asistencias a
+            WHERE a.empleado_id = $1 AND DATE(a.fecha_registro) = CURRENT_DATE
+            ORDER BY a.fecha_registro ASC
+    `, [empleado_id]);
+        const totalRegistrosHoy = registrosHoy.rows.length;
 
-        // 1. Buscar reglas de tolerancia
-        const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
+        // Determinar tipo (entrada/salida)
+        let tipoAsistencia = 'entrada';
 
-        const fechaLocal = new Date();
-        const minsHoraActual = fechaLocal.getHours() * 60 + fechaLocal.getMinutes();
-        const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
-
-        // 2 & 3. Buscar bloque y validar próximo
-        const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max);
-
-        // 4. Verificar dentro de turno (visual)
-        const dentroTurnoVisual = srvDentroDeTurnoVisual(bloqueActual, minsHoraActual);
-
-        // 5. Verificar longitud de bloque (calcula entrada o salida)
-        // Obtener registros de asistencias del dia primero
-        const registrosHoyQuery = await pool.query(`SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE ORDER BY fecha_registro ASC`, [empleado_id]);
-
-        // Prevención de doble clic o peticiones concurrentes (1 minuto)
-        if (registrosHoyQuery.rows.length > 0) {
-            const lastReg = registrosHoyQuery.rows[registrosHoyQuery.rows.length - 1];
-            if (new Date() - new Date(lastReg.fecha_registro) < 60000) {
-                return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
+        // 1. Si viene del frontend, usar eso
+        if (tipo) {
+            tipoAsistencia = tipo.toLowerCase();
+        } else if (tipo_movimiento) {
+            tipoAsistencia = tipo_movimiento.toLowerCase();
+        } else {
+            // 2. Si no viene, calcular (fallback)
+            tipoAsistencia = totalRegistrosHoy % 2 === 0 ? 'entrada' : 'salida';
+        }
+        const esEntrada = tipoAsistencia === 'entrada';
+        const toleranciaQuery = await pool.query(`
+            SELECT t.reglas, t.permite_registro_anticipado,
+            t.minutos_anticipado_max, t.aplica_tolerancia_salida
+            FROM tolerancias t
+            INNER JOIN configuraciones c ON c.tolerancia_id = t.id
+            INNER JOIN empresas emp ON emp.configuracion_id = c.id
+            WHERE emp.id = $1 AND t.es_activo = true
+            LIMIT 1
+        `, [empleado.rows[0].empresa_id]);
+        const tolerancia = toleranciaQuery.rows[0] || {
+            reglas: [],
+            permite_registro_anticipado: true,
+            minutos_anticipado_max: 60
+        };
+        // ========== VALIDACIÓN DE BLOQUE COMPLETADO ==========
+        if (esEntrada && empleado.rows[0].configuracion) {
+            const ahora = new Date();
+            const horaActual = ahora.getHours() * 60 + ahora.getMinutes();
+            const config = typeof empleado.rows[0].configuracion === 'string'
+                ? JSON.parse(empleado.rows[0].configuracion)
+                : empleado.rows[0].configuracion;
+            const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+            const dia = diasSemana[ahora.getDay()];
+            let turnosHoy = [];
+            if (config.configuracion_semanal && config.configuracion_semanal[dia]) {
+                turnosHoy = config.configuracion_semanal[dia].map(t => ({
+                    entrada: t.inicio,
+                    salida: t.fin
+                }));
+            } else if (config.dias && config.dias.includes(dia)) {
+                turnosHoy = config.turnos || [];
+            }
+            const gruposTurnos = agruparTurnosConcatenados(turnosHoy);
+            const bloque = identificarBloqueHorario(gruposTurnos, horaActual, tolerancia);
+            if (bloque && bloqueCompletado(registrosHoy.rows, bloque)) {
+                console.log(`[Asistencia] ❌ Bloque ${bloque.entrada}-${bloque.salida} ya completado para ${empleado_id}`);
+                return res.status(400).json({
+                    success: false,
+                    message: `El bloque ${bloque.entrada}-${bloque.salida} ya está completado. No puedes registrar otra entrada.`,
+                    bloque_completado: true,
+                    bloque: { entrada: bloque.entrada, salida: bloque.salida }
+                });
             }
         }
-        const { cerrado, tipo: tipoCalculado, regsEncontrados } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
-
-        if (cerrado) {
-            return res.status(400).json({ success: false, message: `El bloque actual ya cuenta con entrada y salida. Espera al próximo bloque.` });
-        }
-
-        const tipoFinal = tipoForzado || tipoCalculado;
-
-        // 6 & 7. Validar dentro de zona GPS y red 
-        // (Nota: ubicacion vendría en formato array o parecido. Se pasa junto con tolerancia.segmentos_red)
-        try {
-            srvValidarZonaYRed(ubicacion, null, req.ip, tolerancia.segmentos_red);
-        } catch (e) {
-            return res.status(403).json({ success: false, message: e.message });
-        }
-
-        // 8. Validar dentro de horario y reglas
-        const estadoFinal = srvEvaluarEstado(tipoFinal, minsHoraActual, bloqueActual, tolerancia);
-
-        // -- REGISTRO DB --
+        // Usar estado del frontend si viene, de lo contrario calcular
+        const estadoCalculado = calcularEstadoAsistencia(
+            empleado.rows[0].configuracion,
+            new Date(),
+            tolerancia,
+            esEntrada,
+            totalRegistrosHoy
+        );
+        const estado = estadoRecibido || estadoCalculado;
+        console.log(`[Asistencia] estadoRecibido=${estadoRecibido}, estadoCalculado=${estadoCalculado}, final=${estado}, tipo=${tipoAsistencia}`);
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
-        await pool.query(
-            `INSERT INTO asistencias (id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [id, estadoFinal, 'movil', ubicacion ? `{${ubicacion.join(',')}}` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id]
-        );
-
+        const ubicacionArray = ubicacion ? `{${ubicacion.join(',')} } ` : null;
+        const resultado = await pool.query(`
+            INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id)
+            VALUES($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING *
+    `, [id, estado, dispositivo_origen, ubicacionArray, empleado_id, departamento_id, tipoAsistencia, req.empresa_id]);
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
-        await pool.query(
-            `INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES ($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal, dentroTurnoVisual })]
-        );
+        await pool.query(`
+            INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
+            VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)
+        `, [
+            eventoId,
+            `Registro de ${tipoAsistencia} - ${estado} `,
+            `${empleado.rows[0].nombre} registró ${tipoAsistencia} `,
+            empleado_id,
+            JSON.stringify({
+                asistencia_id: id,
+                estado,
+                dispositivo_origen,
+                tipo: tipoAsistencia,
+                departamento_id
+            })
+        ]);
 
-        // 9. Aumentar conteo (si es retardo)
-        const penalizacion = await srvAumentarConteo(empleado_id, estadoFinal, tolerancia.reglas);
-        if (penalizacion && penalizacion.limiteAlcanzado) {
-            // Se debe registrar la falta
-            const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
-            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4)`, [idFalta, empleado_id, departamento_id, req.empresa_id]);
-
-            const evFalta = await generateId(ID_PREFIXES.EVENTO);
-            await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo })]);
-
-            broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: new Date() });
+        // ==========================================
+        // FASE 2: Acumulación de Retardos (DINÁMICO)
+        // ==========================================
+        let reglasTol = [];
+        if (tolerancia.reglas) {
+            reglasTol = typeof tolerancia.reglas === 'string' ? JSON.parse(tolerancia.reglas) : tolerancia.reglas;
         }
 
-        broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
-        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal, dentroTurnoVisual } });
+        const reglaAplicada = reglasTol.find(r => r.id === estado);
 
-    } catch (error) {
-        console.error(error);
-        res.status(error.message.includes('No encontrado') ? 404 : 500).json({ success: false, message: error.message });
-    }
-}
+        if (reglaAplicada && reglaAplicada.penalizacion_tipo === 'acumulacion' && reglaAplicada.penalizacion_valor > 0) {
+            const limiteRetardos = Number(reglaAplicada.penalizacion_valor);
+            const retardoId = reglaAplicada.id;
 
-async function registrarAsistenciaEscritorio(req, res) {
-    try {
-        const { empleado_id, dispositivo_origen, departamento_id, tipo: tipoForzado } = req.body;
+            // Actualizar el contador dinámico en la tabla empleados (columna contadores JSONB)
+            const updateRes = await pool.query(`
+                UPDATE empleados
+                SET contadores = jsonb_set(
+                    COALESCE(contadores, '{}'::jsonb), 
+                    '{${retardoId}}', 
+                    (COALESCE((contadores->>'${retardoId}')::int, 0) + 1)::text::jsonb
+                )
+                WHERE id = $1
+                RETURNING contadores
+            `, [empleado_id]);
 
-        // 1. Buscar reglas de tolerancia
-        const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
+            const contadorActual = updateRes.rows[0].contadores[retardoId];
+            console.log(`[Asistencia] Empleado ${empleado_id} sumó 1 a ${retardoId}. Total: ${contadorActual}/${limiteRetardos}`);
 
-        const fechaLocal = new Date();
-        const minsHoraActual = fechaLocal.getHours() * 60 + fechaLocal.getMinutes();
-        const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
+            // Si llega al límite de retardos, se convierte en falta
+            if (contadorActual >= limiteRetardos) {
+                // 1. Reiniciar el contador de ese tipo a 0
+                await pool.query(`
+                    UPDATE empleados
+                    SET contadores = jsonb_set(
+                        COALESCE(contadores, '{}'::jsonb), 
+                        '{${retardoId}}', 
+                        '0'::jsonb
+                    )
+                    WHERE id = $1
+                `, [empleado_id]);
 
-        // 2 & 3. Buscar bloque y validar próximo
-        const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max);
+                // 2. Crear una nueva "asistencia" con estado 'falta' y tipo 'sistema' para representarlo
+                const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
+                const motivoFalta = `Acumulación de ${limiteRetardos} retardos tipo ${reglaAplicada.nombre || retardoId}`;
 
-        // 4. Verificar dentro de turno (visual)
-        const dentroTurnoVisual = srvDentroDeTurnoVisual(bloqueActual, minsHoraActual);
+                await pool.query(`
+                    INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id)
+                VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4)
+                    `, [idFalta, empleado_id, departamento_id, req.empresa_id]);
 
-        // 5. Verificar longitud de bloque (calcula entrada o salida)
-        const registrosHoyQuery = await pool.query(`SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE ORDER BY fecha_registro ASC`, [empleado_id]);
+                // 3. Registrar el Evento de "Falta Acumulada"
+                const idEventoFalta = await generateId(ID_PREFIXES.EVENTO);
+                await pool.query(`
+                    INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
+                VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)
+                `, [
+                    idEventoFalta,
+                    'Falta por Acumulación de Retardos',
+                    `${empleado.rows[0].nombre} alcanzó el límite configurado de Retardos tipo ${reglaAplicada.nombre || retardoId}. Se ha generado una falta automática.`,
+                    empleado_id,
+                    JSON.stringify({
+                        asistencia_id: idFalta,
+                        estado: 'falta',
+                        motivo: motivoFalta
+                    })
+                ]);
 
-        // Prevención de doble clic o peticiones concurrentes (1 minuto)
-        if (registrosHoyQuery.rows.length > 0) {
-            const lastReg = registrosHoyQuery.rows[registrosHoyQuery.rows.length - 1];
-            if (new Date() - new Date(lastReg.fecha_registro) < 60000) {
-                return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
+                console.log(`[Asistencia] Falta generada automáticamente por acumulación para el empleado ${empleado_id}.`);
+
+                broadcast('nueva-asistencia', {
+                    id: idFalta,
+                    empleado_id,
+                    empleado_nombre: empleado.rows[0].nombre,
+                    estado: 'falta',
+                    tipo: 'sistema',
+                    motivo: motivoFalta,
+                    fecha: new Date()
+                });
             }
         }
-        const { cerrado, tipo: tipoCalculado } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
+        // ==========================================
 
-        if (cerrado) {
-            return res.status(400).json({ success: false, message: `El bloque actual ya cuenta con entrada y salida. Espera al próximo bloque.` });
-        }
-
-        const tipoFinal = tipoForzado || tipoCalculado;
-
-        // NO Validar dentro de zona ni de red (Escritorio confía en la red local si están en la empresa o se omite según indicación)
-
-        // 6. Validar dentro de horario y reglas
-        const estadoFinal = srvEvaluarEstado(tipoFinal, minsHoraActual, bloqueActual, tolerancia);
-
-        // -- REGISTRO DB --
-        const id = await generateId(ID_PREFIXES.ASISTENCIA);
-        await pool.query(
-            `INSERT INTO asistencias (id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [id, estadoFinal, 'computadora', empleado_id, departamento_id, tipoFinal, req.empresa_id]
-        );
-
-        const eventoId = await generateId(ID_PREFIXES.EVENTO);
-        await pool.query(
-            `INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES ($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal, dentroTurnoVisual })]
-        );
-
-        // 7. Aumentar conteo (si es retardo)
-        const penalizacion = await srvAumentarConteo(empleado_id, estadoFinal, tolerancia.reglas);
-        if (penalizacion && penalizacion.limiteAlcanzado) {
-            // Se debe registrar la falta
-            const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
-            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4)`, [idFalta, empleado_id, departamento_id, req.empresa_id]);
-
-            const evFalta = await generateId(ID_PREFIXES.EVENTO);
-            await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo })]);
-
-            broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: new Date() });
-        }
-
-        broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
-        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal, dentroTurnoVisual } });
-
+        res.status(201).json({
+            success: true,
+            message: `Asistencia registrada como ${estado} `,
+            data: {
+                ...resultado.rows[0],
+                empleado_nombre: empleado.rows[0].nombre,
+                tipo: tipoAsistencia
+            }
+        });
+        // Notificar via SSE
+        broadcast('nueva-asistencia', {
+            id: resultado.rows[0].id,
+            empleado_id,
+            empleado_nombre: empleado.rows[0].nombre,
+            estado,
+            tipo: tipoAsistencia,
+            fecha: new Date()
+        });
     } catch (error) {
-        console.error(error);
-        res.status(error.message.includes('No encontrado') ? 404 : 500).json({ success: false, message: error.message });
+        res.status(500).json({
+            success: false,
+            message: 'Error al registrar asistencia',
+            error: error.message
+        });
     }
 }
 

@@ -1,0 +1,34 @@
+2026-03-02 10:06:16 [32minfo[39m: ✅ Conectado a la base de datos PostgreSQL
+Configuraciones:
+┌─────────┬──────────────────────┬─────────────────────┐
+│ (index) │ column_name          │ data_type           │
+├─────────┼──────────────────────┼─────────────────────┤
+│ 0       │ 'id'                 │ 'character varying' │
+│ 1       │ 'idioma'             │ 'USER-DEFINED'      │
+│ 2       │ 'es_mantenimiento'   │ 'boolean'           │
+│ 3       │ 'formato_fecha'      │ 'USER-DEFINED'      │
+│ 4       │ 'formato_hora'       │ 'USER-DEFINED'      │
+│ 5       │ 'zona_horaria'       │ 'character varying' │
+│ 6       │ 'paleta_colores'     │ 'json'              │
+│ 7       │ 'intentos_maximos'   │ 'integer'           │
+│ 8       │ 'orden_credenciales' │ 'json'              │
+│ 9       │ 'segmentos_red'      │ 'jsonb'             │
+└─────────┴──────────────────────┴─────────────────────┘
+Empresas:
+┌─────────┬───────────────────────┬───────────────────────────────┐
+│ (index) │ column_name           │ data_type                     │
+├─────────┼───────────────────────┼───────────────────────────────┤
+│ 0       │ 'id'                  │ 'character varying'           │
+│ 1       │ 'nombre'              │ 'character varying'           │
+│ 2       │ 'logo'                │ 'text'                        │
+│ 3       │ 'es_activo'           │ 'boolean'                     │
+│ 4       │ 'fecha_registro'      │ 'timestamp without time zone' │
+│ 5       │ 'configuracion_id'    │ 'character varying'           │
+│ 6       │ 'telefono'            │ 'character'                   │
+│ 7       │ 'correo'              │ 'character'                   │
+│ 8       │ 'limite_empleados'    │ 'integer'                     │
+│ 9       │ 'limite_dispositivos' │ 'integer'                     │
+│ 10      │ 'fecha_vencimiento'   │ 'date'                        │
+│ 11      │ 'prefijo'             │ 'character varying'           │
+│ 12      │ 'identificador'       │ 'character varying'           │
+└─────────┴───────────────────────┴───────────────────────────────┘

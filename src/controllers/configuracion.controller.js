@@ -87,7 +87,8 @@ export async function updateConfiguracion(req, res) {
             paleta_colores,
             intentos_maximos,
             orden_credenciales,
-            segmentos_red
+            segmentos_red,
+            intervalo_bloques_minutos
         } = req.body;
 
         const paletaJson = paleta_colores ? JSON.stringify(paleta_colores) : null;
@@ -104,10 +105,11 @@ export async function updateConfiguracion(req, res) {
                 paleta_colores = COALESCE($6, paleta_colores),
                 intentos_maximos = COALESCE($7, intentos_maximos),
                 orden_credenciales = COALESCE($8, orden_credenciales),
-                segmentos_red = COALESCE($9, segmentos_red)
+                segmentos_red = COALESCE($9, segmentos_red),
+                intervalo_bloques_minutos = COALESCE($11, intervalo_bloques_minutos)
             WHERE id = $10
             RETURNING *
-        `, [idioma, es_mantenimiento, formato_fecha, formato_hora, zona_horaria, paletaJson, intentos_maximos, ordenJson, segmentosJson, id]);
+        `, [idioma, es_mantenimiento, formato_fecha, formato_hora, zona_horaria, paletaJson, intentos_maximos, ordenJson, segmentosJson, id, intervalo_bloques_minutos]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

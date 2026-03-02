@@ -13,23 +13,17 @@ export async function getTolerancias(req, res) {
             SELECT
                 t.id,
                 t.nombre,
-                t.minutos_retardo,
-                t.minutos_falta,
-                t.minutos_retardo_a_max,
-                t.minutos_retardo_b_max,
-                t.equivalencia_retardo_a,
-                t.equivalencia_retardo_b,
+                t.permite_registro_anticipado,
                 t.permite_registro_anticipado,
                 t.minutos_anticipado_max,
                 t.aplica_tolerancia_entrada,
                 t.aplica_tolerancia_salida,
                 t.dias_aplica,
                 t.fecha_registro,
+                t.fecha_registro,
                 t.es_activo,
-                r.id as rol_id,
-                r.nombre as rol_nombre
+                t.reglas
             FROM tolerancias t
-            LEFT JOIN roles r ON r.tolerancia_id = t.id
         `;
 
         const params = [req.empresa_id];
@@ -68,9 +62,8 @@ export async function getToleranciaById(req, res) {
         const { id } = req.params;
 
         const resultado = await pool.query(`
-            SELECT t.*, r.id as rol_id, r.nombre as rol_nombre
+            SELECT t.*
             FROM tolerancias t
-            LEFT JOIN roles r ON r.tolerancia_id = t.id
             WHERE t.id = $1 AND t.empresa_id = $2
         `, [id, req.empresa_id]);
 
@@ -81,17 +74,9 @@ export async function getToleranciaById(req, res) {
             });
         }
 
-        // Obtener roles que usan esta tolerancia
-        const roles = await pool.query(`
-            SELECT id, nombre FROM roles WHERE tolerancia_id = $1
-        `, [id]);
-
         res.json({
             success: true,
-            data: {
-                ...resultado.rows[0],
-                roles: roles.rows
-            }
+            data: resultado.rows[0]
         });
 
     } catch (error) {
@@ -113,12 +98,7 @@ export async function createTolerancia(req, res) {
     try {
         let {
             nombre,
-            minutos_retardo = 10,
-            minutos_falta = 30,
-            minutos_retardo_a_max = 20,
-            minutos_retardo_b_max = 29,
-            equivalencia_retardo_a = 10,
-            equivalencia_retardo_b = 5,
+            reglas = [],
             permite_registro_anticipado = true,
             minutos_anticipado_max = 60,
             aplica_tolerancia_entrada = true,
@@ -131,7 +111,7 @@ export async function createTolerancia(req, res) {
         if (!nombre && rol_id) {
             const rol = await client.query('SELECT nombre FROM roles WHERE id = $1', [rol_id]);
             if (rol.rows.length > 0) {
-                nombre = `Tolerancia - ${rol.rows[0].nombre}`;
+                nombre = `Tolerancia - ${rol.rows[0].nombre} `;
             }
         }
 
@@ -147,43 +127,29 @@ export async function createTolerancia(req, res) {
 
         const id = await generateId(ID_PREFIXES.TOLERANCIA);
 
-        // 1. Insertar tolerancia (SIN rol_id, ya que la FK está en roles)
+        // 1. Insertar tolerancia
         const resultado = await client.query(`
-            INSERT INTO tolerancias (
-                id, nombre, minutos_retardo, minutos_falta,
-                minutos_retardo_a_max, minutos_retardo_b_max,
-                equivalencia_retardo_a, equivalencia_retardo_b,
+            INSERT INTO tolerancias(
+                id, nombre, reglas,
                 permite_registro_anticipado, minutos_anticipado_max,
                 aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica, empresa_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            RETURNING *
-        `, [
-            id, nombre, minutos_retardo, minutos_falta,
-            minutos_retardo_a_max, minutos_retardo_b_max,
-            equivalencia_retardo_a, equivalencia_retardo_b,
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+            `, [
+            id, nombre, JSON.stringify(reglas),
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
             dias_aplica ? JSON.stringify(dias_aplica) : null,
             req.empresa_id
         ]);
 
-        // 2. Si se especificó un rol, actualizar el rol para que apunte a esta tolerancia
-        if (rol_id) {
-            await client.query(`
-                UPDATE roles SET tolerancia_id = $1 WHERE id = $2
-            `, [id, rol_id]);
-        }
-
         await client.query('COMMIT');
 
         res.status(201).json({
             success: true,
             message: 'Tolerancia creada correctamente',
-            data: {
-                ...resultado.rows[0],
-                rol_id: rol_id || null // Devolver rol_id para que el frontend lo reconozca
-            }
+            data: resultado.rows[0]
         });
 
     } catch (error) {
@@ -209,12 +175,7 @@ export async function updateTolerancia(req, res) {
         const { id } = req.params;
         const {
             nombre,
-            minutos_retardo,
-            minutos_falta,
-            minutos_retardo_a_max,
-            minutos_retardo_b_max,
-            equivalencia_retardo_a,
-            equivalencia_retardo_b,
+            reglas,
             permite_registro_anticipado,
             minutos_anticipado_max,
             aplica_tolerancia_entrada,
@@ -230,24 +191,18 @@ export async function updateTolerancia(req, res) {
         // 1. Actualizar tolerancia
         const resultado = await client.query(`
             UPDATE tolerancias SET
-                nombre = COALESCE($1, nombre),
-                minutos_retardo = COALESCE($2, minutos_retardo),
-                minutos_falta = COALESCE($3, minutos_falta),
-                minutos_retardo_a_max = COALESCE($4, minutos_retardo_a_max),
-                minutos_retardo_b_max = COALESCE($5, minutos_retardo_b_max),
-                equivalencia_retardo_a = COALESCE($6, equivalencia_retardo_a),
-                equivalencia_retardo_b = COALESCE($7, equivalencia_retardo_b),
-                permite_registro_anticipado = COALESCE($8, permite_registro_anticipado),
-                minutos_anticipado_max = COALESCE($9, minutos_anticipado_max),
-                aplica_tolerancia_entrada = COALESCE($10, aplica_tolerancia_entrada),
-                aplica_tolerancia_salida = COALESCE($11, aplica_tolerancia_salida),
-                dias_aplica = COALESCE($12, dias_aplica)
-            WHERE id = $13 AND empresa_id = $14
-            RETURNING *
-        `, [
-            nombre, minutos_retardo, minutos_falta,
-            minutos_retardo_a_max, minutos_retardo_b_max,
-            equivalencia_retardo_a, equivalencia_retardo_b,
+        nombre = COALESCE($1, nombre),
+            reglas = COALESCE($2, reglas),
+            permite_registro_anticipado = COALESCE($3, permite_registro_anticipado),
+            minutos_anticipado_max = COALESCE($4, minutos_anticipado_max),
+            aplica_tolerancia_entrada = COALESCE($5, aplica_tolerancia_entrada),
+            aplica_tolerancia_salida = COALESCE($6, aplica_tolerancia_salida),
+            dias_aplica = COALESCE($7, dias_aplica)
+            WHERE id = $8 AND empresa_id = $9
+        RETURNING *
+            `, [
+            nombre,
+            reglas ? JSON.stringify(reglas) : null,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
             diasJson, id, req.empresa_id
@@ -261,32 +216,12 @@ export async function updateTolerancia(req, res) {
             });
         }
 
-        // 2. Si se especificó un rol, actualizar el rol
-        if (rol_id !== undefined) {
-            // Si rol_id es null, significa desvincular? 
-            // La lógica actual de createTolerancia (anterior) permitía null.
-            // Si se envía un ID, asignamos. Si se envía null, quizás desasignamos?
-            // Asumiremos que si se envía un valor explícito, se actualiza.
-            if (rol_id) {
-                // Verificar si este rol ya tenía otra tolerancia y reemplazarla
-                await client.query(`UPDATE roles SET tolerancia_id = $1 WHERE id = $2`, [id, rol_id]);
-            } else {
-                // Si rol_id es null o false, no hacemos nada o desvinculamos?
-                // El frontend envía rol_id=null para "General". Pero "General" no es un rol en la DB.
-                // Si estoy editando la tolerancia "General", rol_id será null.
-                // No necesitamos actualizar roles en ese caso.
-            }
-        }
-
         await client.query('COMMIT');
 
         res.json({
             success: true,
             message: 'Tolerancia actualizada correctamente',
-            data: {
-                ...resultado.rows[0],
-                rol_id: rol_id || null
-            }
+            data: resultado.rows[0]
         });
 
     } catch (error) {
@@ -311,7 +246,7 @@ export async function deleteTolerancia(req, res) {
 
         const resultado = await pool.query(`
             UPDATE tolerancias SET es_activo = false WHERE id = $1 AND empresa_id = $2 RETURNING id, nombre
-        `, [id, req.empresa_id]);
+            `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
