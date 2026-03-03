@@ -73,7 +73,7 @@ async function registrarAsistenciaMovil(req, res) {
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         await pool.query(
             `INSERT INTO asistencias (id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [id, estadoFinal, 'movil', ubicacion ? `{${ubicacion.join(',')}}` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id]
+            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')}}` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
@@ -148,7 +148,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         await pool.query(
             `INSERT INTO asistencias (id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [id, estadoFinal, 'computadora', empleado_id, departamento_id, tipoFinal, req.empresa_id]
+            [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
