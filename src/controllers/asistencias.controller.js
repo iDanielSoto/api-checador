@@ -50,13 +50,20 @@ async function registrarAsistenciaMovil(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, regsEncontrados } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque actual ya cuenta con entrada y salida. Espera al próximo bloque.` });
         }
 
         const tipoFinal = tipoForzado || tipoCalculado;
+
+        if (tipoFinal === 'entrada' && entradas > 0) {
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de entrada para este turno.' });
+        }
+        if (tipoFinal === 'salida' && salidas > 0) {
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este turno.' });
+        }
 
         // 6 & 7. Validar dentro de zona GPS y red 
         // (Nota: ubicacion vendría en formato array o parecido. Se pasa junto con tolerancia.segmentos_red)
@@ -131,13 +138,20 @@ async function registrarAsistenciaEscritorio(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque actual ya cuenta con entrada y salida. Espera al próximo bloque.` });
         }
 
         const tipoFinal = tipoForzado || tipoCalculado;
+
+        if (tipoFinal === 'entrada' && entradas > 0) {
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de entrada para este turno.' });
+        }
+        if (tipoFinal === 'salida' && salidas > 0) {
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este turno.' });
+        }
 
         // NO Validar dentro de zona ni de red (Escritorio confía en la red local si están en la empresa o se omite según indicación)
 

@@ -1,10 +1,14 @@
-import 'dotenv/config';
 import { pool } from './src/config/db.js';
 
-async function check() {
-    const res = await pool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'usuarios'");
-    console.log(res.rows.map(x => x.column_name));
-    process.exit(0);
+async function updateDb() {
+    try {
+        await pool.query('ALTER TABLE tolerancias ADD COLUMN IF NOT EXISTS minutos_anticipo_salida INT DEFAULT 0');
+        await pool.query('ALTER TABLE tolerancias ADD COLUMN IF NOT EXISTS minutos_posterior_salida INT DEFAULT 60');
+        console.log('Columns added successfully');
+    } catch (e) {
+        console.error(e);
+    } finally {
+        process.exit(0);
+    }
 }
-
-check();
+updateDb();

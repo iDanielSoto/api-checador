@@ -20,6 +20,7 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
     const confQuery = await pool.query(`
         SELECT t.reglas, t.permite_registro_anticipado,
                t.minutos_anticipado_max, t.dias_aplica,
+               t.minutos_anticipo_salida, t.minutos_posterior_salida,
                c.segmentos_red, 
                COALESCE(c.intervalo_bloques_minutos, 60) as intervalo_bloques_minutos
         FROM tolerancias t
@@ -33,6 +34,8 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
         reglas: '[]',
         permite_registro_anticipado: true,
         minutos_anticipado_max: 60,
+        minutos_anticipo_salida: 0,
+        minutos_posterior_salida: 60,
         segmentos_red: '[]',
         intervalo_bloques_minutos: 60,
         dias_aplica: '{}'
@@ -126,13 +129,24 @@ export function srvDentroDeTurnoVisual(bloque, horaMinutos) {
  */
 export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO) {
     if (!bloque) {
-        // Fallback: Si no hay bloque/horario, se alterna entrada/salida basado en el total de registros del día
-        const regsHoyCount = registrosHoy.length;
-        return {
-            cerrado: false,
-            tipo: regsHoyCount % 2 === 0 ? 'entrada' : 'salida',
-            regsEncontrados: regsHoyCount
-        };
+        // Fallback: Si no hay bloque/horario, validamos contra el último registro para evitar repetidos
+        const regsCorregidos = [...registrosHoy].sort((a, b) => new Date(b.fecha_registro) - new Date(a.fecha_registro));
+        const lastReg = regsCorregidos[0];
+
+        let cerrado = false;
+        let tipo = 'entrada';
+        let entradas = 0;
+        let salidas = 0;
+
+        if (lastReg) {
+            if (lastReg.tipo === 'entrada') {
+                entradas = 1; tipo = 'salida';
+            } else if (lastReg.tipo === 'salida') {
+                salidas = 1; tipo = 'entrada';
+            }
+        }
+
+        return { cerrado, tipo, entradas, salidas };
     }
 
     // Filtramos solo los registros del dia en el huso de la empresa.
@@ -160,7 +174,7 @@ export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO) {
         tipo = 'completado';
     }
 
-    return { cerrado, tipo, regsEncontrados: regsBloque.length };
+    return { cerrado, tipo, entradas, salidas };
 }
 
 /**
@@ -211,10 +225,20 @@ export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia
         // Si superó TODOS los límites de retardo, es falta.
         return 'falta';
     } else {
-        // EN SALIDA: Solo hay salida_puntual o salida_temprano. 
+        // EN SALIDA:
         let faltanMins = bloque.salida - horaMinutos;
-        // Tolerancia a la salida: si se sale antes del minuto de salida, es salida_temprano
-        if (faltanMins > 0) return 'salida_temprano';
+        let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0;
+        let posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
+
+        // Tolerancia a la salida: si se sale antes de lo permitido
+        if (faltanMins > anticipoPermitido) return 'salida_temprano';
+
+        // Si pasaron demasiados minutos después de su salida permitida
+        if (faltanMins < 0 && Math.abs(faltanMins) > posteriorPermitido) {
+            return 'salida_tarde';
+        }
+
+        // Salió dentro del margen establecido
         return 'salida_puntual';
     }
 }

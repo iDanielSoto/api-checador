@@ -14,12 +14,12 @@ export async function getTolerancias(req, res) {
                 t.id,
                 t.nombre,
                 t.permite_registro_anticipado,
-                t.permite_registro_anticipado,
                 t.minutos_anticipado_max,
                 t.aplica_tolerancia_entrada,
                 t.aplica_tolerancia_salida,
+                t.minutos_anticipo_salida,
+                t.minutos_posterior_salida,
                 t.dias_aplica,
-                t.fecha_registro,
                 t.fecha_registro,
                 t.es_activo,
                 t.reglas
@@ -103,6 +103,8 @@ export async function createTolerancia(req, res) {
             minutos_anticipado_max = 60,
             aplica_tolerancia_entrada = true,
             aplica_tolerancia_salida = false,
+            minutos_anticipo_salida = 0,
+            minutos_posterior_salida = 60,
             dias_aplica,
             rol_id
         } = req.body;
@@ -132,14 +134,17 @@ export async function createTolerancia(req, res) {
             INSERT INTO tolerancias(
                 id, nombre, reglas,
                 permite_registro_anticipado, minutos_anticipado_max,
-                aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica, empresa_id
+                aplica_tolerancia_entrada, aplica_tolerancia_salida, 
+                minutos_anticipo_salida, minutos_posterior_salida,
+                dias_aplica, empresa_id
             )
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *
             `, [
             id, nombre, JSON.stringify(reglas),
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
+            minutos_anticipo_salida, minutos_posterior_salida,
             dias_aplica ? JSON.stringify(dias_aplica) : null,
             req.empresa_id
         ]);
@@ -180,6 +185,8 @@ export async function updateTolerancia(req, res) {
             minutos_anticipado_max,
             aplica_tolerancia_entrada,
             aplica_tolerancia_salida,
+            minutos_anticipo_salida,
+            minutos_posterior_salida,
             dias_aplica,
             rol_id
         } = req.body;
@@ -197,14 +204,17 @@ export async function updateTolerancia(req, res) {
             minutos_anticipado_max = COALESCE($4, minutos_anticipado_max),
             aplica_tolerancia_entrada = COALESCE($5, aplica_tolerancia_entrada),
             aplica_tolerancia_salida = COALESCE($6, aplica_tolerancia_salida),
-            dias_aplica = COALESCE($7, dias_aplica)
-            WHERE id = $8 AND empresa_id = $9
+            minutos_anticipo_salida = COALESCE($7, minutos_anticipo_salida),
+            minutos_posterior_salida = COALESCE($8, minutos_posterior_salida),
+            dias_aplica = COALESCE($9, dias_aplica)
+            WHERE id = $10 AND empresa_id = $11
         RETURNING *
             `, [
             nombre,
             reglas ? JSON.stringify(reglas) : null,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
+            minutos_anticipo_salida, minutos_posterior_salida,
             diasJson, id, req.empresa_id
         ]);
 
