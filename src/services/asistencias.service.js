@@ -61,10 +61,18 @@ export function srvObtenerTurnosDeHoy(horario, fechaActualLocal) {
     const dias = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
     const diaHoy = dias[fechaActualLocal.getDay()];
     let turnos = [];
-    if (horario.configuracion_semanal && horario.configuracion_semanal[diaHoy]) {
-        turnos = horario.configuracion_semanal[diaHoy];
-    } else if (horario.dias && horario.dias.includes(diaHoy)) {
-        turnos = horario.turnos || [];
+    if (horario.configuracion_semanal) {
+        const key = Object.keys(horario.configuracion_semanal).find(k => k.toLowerCase() === diaHoy);
+        if (key) {
+            turnos = horario.configuracion_semanal[key];
+        }
+    }
+
+    if (turnos.length === 0 && horario.dias) {
+        const hasDay = horario.dias.some(d => d.toLowerCase() === diaHoy);
+        if (hasDay) {
+            turnos = horario.turnos || [];
+        }
     }
     return turnos;
 }
@@ -345,7 +353,7 @@ export async function srvAumentarConteo(empleadoId, estadoCalculado, reglasToler
 
         return {
             limiteAlcanzado: true,
-            motivo: `Acumulación de ${limiteRetardos} retardos tipo ${reglaAplicada.id}`
+            motivo: \`Acumulación de \${limiteRetardos} retardos tipo \${reglaAplicada.id}\`
         };
     }
     return { limiteAlcanzado: false, contadorActual };
