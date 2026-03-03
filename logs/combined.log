@@ -3283,3 +3283,14 @@ info: ────────────────────────�
 info: [CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City) {"timestamp":"2026-03-02 19:53:22"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 19:53:22"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 19:53:49"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-02 20:23:10"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-02 20:23:10"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-02 20:23:10"}
+info: 📦 development {"timestamp":"2026-03-02 20:23:10"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-02 20:23:10"}
+info: 🕓 2/3/2026, 8:23:10 p.m. {"timestamp":"2026-03-02 20:23:10"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-02 20:23:10"}
+info: [CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City) {"timestamp":"2026-03-02 20:23:10"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 20:23:10"}
