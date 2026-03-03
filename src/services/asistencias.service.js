@@ -252,6 +252,57 @@ export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia
 }
 
 /**
+ * 9. VALIDAR VENTANA DE REGISTRO (BLOQUEO DURO PARA EL FRONTEND)
+ */
+export function srvValidarVentanaDeRegistro(bloque, horaMinutos, tolerancia, tipoAsistencia) {
+    if (!bloque) return { valido: true }; // Sin horario, no hay restricciones de ventana
+
+    if (tipoAsistencia === 'entrada') {
+        let anticipoPermitido = tolerancia.minutos_anticipado_max || 0;
+        let inicioValido = bloque.entrada - anticipoPermitido;
+        let finValido = bloque.salida; // No dejar entrar después de la hora de salida
+
+        if (horaMinutos < inicioValido) {
+            return {
+                valido: false,
+                mensaje: 'Registro anticipado no permitido o Aún no es hora.',
+                estadoHorario: 'tiempo_insuficiente'
+            };
+        }
+        if (horaMinutos > finValido) {
+            return {
+                valido: false,
+                mensaje: 'Tu turno ya finalizó, no puedes registrar entrada.',
+                estadoHorario: 'tiempo_insuficiente'
+            };
+        }
+    } else {
+        let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0;
+        let posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
+
+        let inicioSalida = bloque.salida - anticipoPermitido;
+        let finSalida = bloque.salida + posteriorPermitido;
+
+        if (horaMinutos < inicioSalida) {
+            return {
+                valido: false,
+                mensaje: 'Salida anticipada bloqueada / Tiempo insuficiente.',
+                estadoHorario: 'tiempo_insuficiente'
+            };
+        }
+        if (horaMinutos > finSalida) {
+            return {
+                valido: false,
+                mensaje: 'Has superado el tiempo límite para registrar tu salida.',
+                estadoHorario: 'tiempo_insuficiente'
+            };
+        }
+    }
+
+    return { valido: true };
+}
+
+/**
  * 9. ACTUALIZAR CONTEO JSONB SI ES RETARDO 
  */
 export async function srvAumentarConteo(empleadoId, estadoCalculado, reglasTolerancia, resFaltaDirecta = null) {

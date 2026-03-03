@@ -10,6 +10,7 @@ import {
     srvVerificarLongitudYTipo,
     srvValidarZonaYRed,
     srvEvaluarEstado,
+    srvValidarVentanaDeRegistro,
     srvAumentarConteo
 } from '../services/asistencias.service.js';
 
@@ -63,6 +64,17 @@ async function registrarAsistenciaMovil(req, res) {
         }
         if (tipoFinal === 'salida' && salidas > 0) {
             return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este turno.' });
+        }
+
+        // 5b. Validar la Ventana de Registro para Bloqueos de Offline
+        const vVentana = srvValidarVentanaDeRegistro(bloqueActual, minsHoraActual, tolerancia, tipoFinal);
+        if (!vVentana.valido) {
+            return res.status(400).json({
+                success: false,
+                message: vVentana.mensaje,
+                noPuedeRegistrar: true,
+                estadoHorario: vVentana.estadoHorario
+            });
         }
 
         // 6 & 7. Validar dentro de zona GPS y red 
@@ -151,6 +163,17 @@ async function registrarAsistenciaEscritorio(req, res) {
         }
         if (tipoFinal === 'salida' && salidas > 0) {
             return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este turno.' });
+        }
+
+        // 5b. Validar la Ventana de Registro para Bloqueos de Offline
+        const vVentana = srvValidarVentanaDeRegistro(bloqueActual, minsHoraActual, tolerancia, tipoFinal);
+        if (!vVentana.valido) {
+            return res.status(400).json({
+                success: false,
+                message: vVentana.mensaje,
+                noPuedeRegistrar: true,
+                estadoHorario: vVentana.estadoHorario
+            });
         }
 
         // NO Validar dentro de zona ni de red (Escritorio confía en la red local si están en la empresa o se omite según indicación)
