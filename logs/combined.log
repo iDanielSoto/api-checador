@@ -3384,3 +3384,4 @@ info: 🕓 3/3/2026, 12:40:22 a.m. {"timestamp":"2026-03-03 00:40:22"}
 info: ─────────────────────────────────────────────
  {"timestamp":"2026-03-03 00:40:22"}
 info: [CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City) {"timestamp":"2026-03-03 00:40:22"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-03 00:40:22"}
