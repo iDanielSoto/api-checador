@@ -43,7 +43,7 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
 
     let reglas = typeof configuracion.reglas === 'string' ? JSON.parse(configuracion.reglas) : configuracion.reglas;
     let red = typeof configuracion.segmentos_red === 'string' ? JSON.parse(configuracion.segmentos_red) : configuracion.segmentos_red;
-    let horario = typeof empleado.horario_json === 'string' ? JSON.parse(empleado.horario_json) : null;
+    let horario = typeof empleado.horario_json === 'string' ? JSON.parse(empleado.horario_json) : (empleado.horario_json || null);
     let diasAplica = typeof configuracion.dias_aplica === 'string' ? JSON.parse(configuracion.dias_aplica) : (configuracion.dias_aplica || {});
 
     return {
@@ -353,7 +353,7 @@ export async function srvAumentarConteo(empleadoId, estadoCalculado, reglasToler
 
         return {
             limiteAlcanzado: true,
-            motivo: \`Acumulación de \${limiteRetardos} retardos tipo \${reglaAplicada.id}\`
+            motivo: `Acumulación de ${limiteRetardos} retardos tipo ${reglaAplicada.id}`
         };
     }
     return { limiteAlcanzado: false, contadorActual };
