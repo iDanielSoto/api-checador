@@ -189,22 +189,31 @@ export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia
 
     if (tipoAsistencia === 'entrada') {
         let llegadaAdelantadoOMinutosTarde = horaMinutos - bloque.entrada;
-        // Si llegó antes, puntual (a menos que se penalice entrada muy temprana)
+        // Si llegó antes o a tiempo, siempre es puntual
         if (llegadaAdelantadoOMinutosTarde <= 0) return 'puntual';
 
-        if (!aplicaHoy) return llegadaAdelantadoOMinutosTarde <= 0 ? 'puntual' : 'falta';
+        // LLEGÓ TARDE (llegadaAdelantadoOMinutosTarde > 0):
+        if (!aplicaHoy) {
+            // Si HOY NO HAY tolerancias permitidas y llegó tarde, pero tiene reglas configuradas,
+            // podemos considerarlo falta directamente o ignorarlo según requerimiento.
+            // Para el caso general, si no hay tolerancia hoy, cualquier minuto tarde es falta.
+            return 'falta';
+        }
 
+        // Sí hay tolerancia hoy. Vamos a buscar si los minutos tarde caen dentro de algún retardo
         let reglas = [...(tolerancia.reglas || [])].sort((a, b) => a.limite_minutos - b.limite_minutos);
         for (let r of reglas) {
             if (llegadaAdelantadoOMinutosTarde <= r.limite_minutos) {
                 return r.id; // retornará retardo_a, retardo_b, etc.
             }
         }
-        return 'falta'; // fallback
+
+        // Si superó TODOS los límites de retardo, es falta.
+        return 'falta';
     } else {
         // EN SALIDA: Solo hay salida_puntual o salida_temprano. 
         let faltanMins = bloque.salida - horaMinutos;
-        // Tolerancia a la salida ya se quitó de front, así que salida_temprana es estricto a las 0 mins de diferencia
+        // Tolerancia a la salida: si se sale antes del minuto de salida, es salida_temprano
         if (faltanMins > 0) return 'salida_temprano';
         return 'salida_puntual';
     }

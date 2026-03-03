@@ -636,19 +636,17 @@ export async function getEquivalenciasEmpleado(req, res) {
         } = req.query;
 
         // Obtener tolerancia del empleado (para equivalencias configuradas)
-        const tolRes = await pool.query(`
-            SELECT t.equivalencia_retardo_a, t.equivalencia_retardo_b
-            FROM tolerancias t
-            INNER JOIN roles r ON r.tolerancia_id = t.id
-            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
-            INNER JOIN empleados e ON e.usuario_id = ur.usuario_id
-            WHERE e.id = $1 AND ur.es_activo = true
-            ORDER BY r.posicion DESC
-            LIMIT 1
-        `, [empleadoId]);
+        const empQuery = await pool.query('SELECT u.empresa_id FROM empleados e JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1 LIMIT 1', [empleadoId]);
+        const empresa_id = empQuery.rows[0]?.empresa_id;
 
-        const eqA = tolRes.rows[0]?.equivalencia_retardo_a ?? 10;
-        const eqB = tolRes.rows[0]?.equivalencia_retardo_b ?? 5;
+        let eqA = 10;
+        let eqB = 5;
+
+        if (empresa_id) {
+            const { tolerancia } = await srvBuscarConfiguracion(empleadoId, empresa_id);
+            eqA = tolerancia.reglas?.find(r => r.id === 'retardo_a')?.penalizacion_valor ?? 10;
+            eqB = tolerancia.reglas?.find(r => r.id === 'retardo_b')?.penalizacion_valor ?? 5;
+        }
 
         // Conteos del período
         const statsRes = await pool.query(`

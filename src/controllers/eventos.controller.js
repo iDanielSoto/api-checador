@@ -145,13 +145,15 @@ export async function createEvento(req, res) {
             });
         }
 
+        const tipoEventoEnum = tipo_evento.toLowerCase();
+
         const id = await generateId(ID_PREFIXES.EVENTO);
 
         const resultado = await pool.query(`
             INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, detalles, empleado_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
-        `, [id, titulo, descripcion, tipo_evento, prioridad, detalles ? JSON.stringify(detalles) : null, empleado_id]);
+        `, [id, titulo, descripcion, tipoEventoEnum, prioridad, detalles ? JSON.stringify(detalles) : null, empleado_id]);
 
         res.status(201).json({
             success: true,

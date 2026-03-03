@@ -3238,3 +3238,48 @@ info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 15:49
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 15:52:25"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 15:53:20"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 15:53:51"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-02 19:13:55"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-02 19:13:55"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-02 19:13:55"}
+info: 📦 development {"timestamp":"2026-03-02 19:13:55"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-02 19:13:55"}
+info: 🕓 2/3/2026, 7:13:55 p.m. {"timestamp":"2026-03-02 19:13:55"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-02 19:13:55"}
+info: [CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City) {"timestamp":"2026-03-02 19:13:55"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 19:13:56"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-02 19:52:02"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-02 19:52:02"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-02 19:52:02"}
+info: 📦 development {"timestamp":"2026-03-02 19:52:02"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-02 19:52:02"}
+info: 🕓 2/3/2026, 7:52:02 p.m. {"timestamp":"2026-03-02 19:52:02"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-02 19:52:02"}
+info: [CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City) {"timestamp":"2026-03-02 19:52:02"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 19:52:02"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-02 19:52:56"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-02 19:52:56"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-02 19:52:56"}
+info: 📦 development {"timestamp":"2026-03-02 19:52:56"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-02 19:52:56"}
+info: 🕓 2/3/2026, 7:52:56 p.m. {"timestamp":"2026-03-02 19:52:56"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-02 19:52:56"}
+info: [CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City) {"timestamp":"2026-03-02 19:52:56"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 19:52:56"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-02 19:53:22"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-02 19:53:22"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-02 19:53:22"}
+info: 📦 development {"timestamp":"2026-03-02 19:53:22"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-02 19:53:22"}
+info: 🕓 2/3/2026, 7:53:22 p.m. {"timestamp":"2026-03-02 19:53:22"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-02 19:53:22"}
+info: [CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City) {"timestamp":"2026-03-02 19:53:22"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 19:53:22"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-02 19:53:49"}
