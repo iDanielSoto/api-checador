@@ -255,7 +255,13 @@ export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia
  * 9. VALIDAR VENTANA DE REGISTRO (BLOQUEO DURO PARA EL FRONTEND)
  */
 export function srvValidarVentanaDeRegistro(bloque, horaMinutos, tolerancia, tipoAsistencia) {
-    if (!bloque) return { valido: true }; // Sin horario, no hay restricciones de ventana
+    if (!bloque) {
+        return {
+            valido: false,
+            mensaje: 'No tienes un turno asignado para el día de hoy o es tu día de descanso.',
+            estadoHorario: 'tiempo_insuficiente'
+        };
+    }
 
     if (tipoAsistencia === 'entrada') {
         let anticipoPermitido = tolerancia.minutos_anticipado_max || 0;
