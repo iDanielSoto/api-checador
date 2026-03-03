@@ -99,19 +99,27 @@ export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloque
     }
     bloques.push(bActual);
 
-    // Buscar bloque activo
-    // Se considera activo si está entre (inicio - anticipoMax) y (fin + x mins margen salida posterior)
-    let margenSalidaPosterior = 240; // 4 horas para no fallar
-    for (let b of bloques) {
+    // Asignar dinámicamente el margen de salida de cada bloque para que no "devore" al siguiente
+    for (let i = 0; i < bloques.length; i++) {
+        let b = bloques[i];
         let inicioPermitido = b.entrada - anticipoMax;
-        let finPermitido = b.salida + margenSalidaPosterior;
+
+        // El margen para la salida es de 4 horas, PERO si hay un bloque que le sigue, 
+        // su frontera de fin no debe pasarse de la frontera de inicioPermitido del siguiente bloque.
+        let finPermitido = b.salida + 240;
+        if (i < bloques.length - 1) {
+            let inicioSiguiente = bloques[i + 1].entrada - anticipoMax;
+            // Para proteger el próximo bloque, limitamos el bloque actual a la mitad de su separación
+            // o simplemente que termine justo donde arranca la ventana del siguiente.
+            finPermitido = Math.min(finPermitido, inicioSiguiente - 1);
+        }
 
         if (horaMinutos >= inicioPermitido && horaMinutos <= finPermitido) {
             return b;
         }
     }
 
-    // Si es más temprano que todos o más tarde, retorna el 1ro o último pa castigarlo
+    // Si es más temprano que todos o más tarde, retorna el 1ro o último como fallback
     if (horaMinutos < bloques[0].entrada) return bloques[0];
     return bloques[bloques.length - 1];
 }
