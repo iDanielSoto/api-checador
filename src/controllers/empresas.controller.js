@@ -65,7 +65,7 @@ export async function getMiEmpresa(req, res) {
             SELECT
                 e.id, e.nombre, e.identificador, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
                 e.configuracion_id,
-                c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora, c.segmentos_red,
+                c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora, c.segmentos_red, c.requiere_salida,
                 (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
                 (SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id = e.id AND u.estado_cuenta = 'activo') as total_usuarios
             FROM empresas e
@@ -104,12 +104,15 @@ export async function updateMiEmpresa(req, res) {
                 telefono = $3,
                 correo = $4
             WHERE id = $5
-            RETURNING id, nombre, logo, telefono, correo, es_activo
+            RETURNING *
         `, [nombre.trim(), logo || null, telefono || null, correo || null, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
         }
+
+        const empresaActualizada = resultado.rows[0];
+        broadcast('empresa-actualizada', empresaActualizada);
 
         res.json({ success: true, data: resultado.rows[0], message: 'Empresa actualizada correctamente' });
 
