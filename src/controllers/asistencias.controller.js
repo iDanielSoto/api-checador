@@ -6,7 +6,6 @@ import {
     srvBuscarConfiguracion,
     srvObtenerTurnosDeHoy,
     srvBuscarBloqueActual,
-    srvDentroDeTurnoVisual,
     srvVerificarLongitudYTipo,
     srvValidarZonaYRed,
     srvEvaluarEstado,
@@ -37,8 +36,7 @@ async function registrarAsistenciaMovil(req, res) {
         // 2 & 3. Buscar bloque y validar próximo
         const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max);
 
-        // 4. Verificar dentro de turno (visual)
-        const dentroTurnoVisual = srvDentroDeTurnoVisual(bloqueActual, minsHoraActual);
+
 
         // 5. Verificar longitud de bloque (calcula entrada o salida)
         // Obtener registros de asistencias del dia primero
@@ -51,19 +49,19 @@ async function registrarAsistenciaMovil(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos);
 
         if (cerrado) {
-            return res.status(400).json({ success: false, message: `El bloque actual ya cuenta con entrada y salida. Espera al próximo bloque.` });
+            return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });
         }
 
         const tipoFinal = tipoForzado || tipoCalculado;
 
         if (tipoFinal === 'entrada' && entradas > 0) {
-            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de entrada para este turno.' });
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de entrada para este bloque de horario.' });
         }
         if (tipoFinal === 'salida' && salidas > 0) {
-            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este turno.' });
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este bloque de horario.' });
         }
 
         // 5b. Validar la Ventana de Registro para Bloqueos de Offline
@@ -98,7 +96,7 @@ async function registrarAsistenciaMovil(req, res) {
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
             `INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES ($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal, dentroTurnoVisual })]
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
         );
 
         // 9. Aumentar conteo (si es retardo)
@@ -115,7 +113,7 @@ async function registrarAsistenciaMovil(req, res) {
         }
 
         broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
-        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal, dentroTurnoVisual } });
+        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal } });
 
     } catch (error) {
         console.error(error);
@@ -138,7 +136,6 @@ async function registrarAsistenciaEscritorio(req, res) {
         const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max);
 
         // 4. Verificar dentro de turno (visual)
-        const dentroTurnoVisual = srvDentroDeTurnoVisual(bloqueActual, minsHoraActual);
 
         // 5. Verificar longitud de bloque (calcula entrada o salida)
         const registrosHoyQuery = await pool.query(`SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE ORDER BY fecha_registro ASC`, [empleado_id]);
@@ -150,19 +147,19 @@ async function registrarAsistenciaEscritorio(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString());
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos);
 
         if (cerrado) {
-            return res.status(400).json({ success: false, message: `El bloque actual ya cuenta con entrada y salida. Espera al próximo bloque.` });
+            return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });
         }
 
         const tipoFinal = tipoForzado || tipoCalculado;
 
         if (tipoFinal === 'entrada' && entradas > 0) {
-            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de entrada para este turno.' });
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de entrada para este bloque de horario.' });
         }
         if (tipoFinal === 'salida' && salidas > 0) {
-            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este turno.' });
+            return res.status(400).json({ success: false, message: 'Ya cuentas con un registro de salida para este bloque de horario.' });
         }
 
         // 5b. Validar la Ventana de Registro para Bloqueos de Offline
@@ -191,7 +188,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
             `INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES ($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal, dentroTurnoVisual })]
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
         );
 
         // 7. Aumentar conteo (si es retardo)
@@ -208,7 +205,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         }
 
         broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
-        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal, dentroTurnoVisual } });
+        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal } });
 
     } catch (error) {
         console.error(error);

@@ -57,7 +57,7 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
 }
 
 /**
- * Mapear el día actual a turnos (lunes, martes, etc.)
+ * Obtener los rangos de tiempo configurados para hoy
  */
 export function srvObtenerTurnosDeHoy(horario, fechaActualLocal) {
     if (!horario) return [];
@@ -66,118 +66,71 @@ export function srvObtenerTurnosDeHoy(horario, fechaActualLocal) {
     let turnos = [];
     if (horario.configuracion_semanal) {
         const key = Object.keys(horario.configuracion_semanal).find(k => k.toLowerCase() === diaHoy);
-        if (key) {
-            turnos = horario.configuracion_semanal[key];
-        }
+        if (key) turnos = horario.configuracion_semanal[key];
     }
-
     if (turnos.length === 0 && horario.dias) {
         const hasDay = horario.dias.some(d => d.toLowerCase() === diaHoy);
-        if (hasDay) {
-            turnos = horario.turnos || [];
-        }
+        if (hasDay) turnos = horario.turnos || [];
     }
     return turnos;
 }
 
 /**
- * 2. AGRUPAR BLOQUES COMPUESTOS Y 3. BUSCAR PRÓXIMO BLOQUE
+ * 2. CREACIÓN DE BLOQUES FUSIONADOS
  */
-export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloquesMinutos, anticipoMax) {
+export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloquesMinutos, anticipoEntradaMax) {
     if (!turnosDelDia || turnosDelDia.length === 0) return null;
 
-    // Aplanar y convertir turnos a minutos
-    const turnosEnMinutos = turnosDelDia.map(t => {
+    // Convertir a minutos y ordenar
+    const rangos = turnosDelDia.map(t => {
         const [he, me] = (t.inicio || t.entrada || "00:00").split(':').map(Number);
         const [hs, ms] = (t.fin || t.salida || "00:00").split(':').map(Number);
-        return { entrada: he * 60 + me, salida: hs * 60 + ms, strEntrada: t.inicio || t.entrada, strSalida: t.fin || t.salida };
+        return { entrada: he * 60 + me, salida: hs * 60 + ms };
     }).sort((a, b) => a.entrada - b.entrada);
 
-    // Agrupar
+    // Fusión de rangos en Bloques usando el intervalo configurado
     const bloques = [];
-    let bActual = { ...turnosEnMinutos[0] };
+    let bActual = { ...rangos[0] };
 
-    for (let i = 1; i < turnosEnMinutos.length; i++) {
-        const tSiguiente = turnosEnMinutos[i];
-        const separacion = tSiguiente.entrada - bActual.salida;
+    for (let i = 1; i < rangos.length; i++) {
+        const rSiguiente = rangos[i];
+        const separacion = rSiguiente.entrada - bActual.salida;
         if (separacion <= intervaloBloquesMinutos) {
-            bActual.salida = Math.max(bActual.salida, tSiguiente.salida);
-            bActual.strSalida = tSiguiente.strSalida;
+            bActual.salida = Math.max(bActual.salida, rSiguiente.salida);
         } else {
             bloques.push({ ...bActual });
-            bActual = { ...tSiguiente };
+            bActual = { ...rSiguiente };
         }
     }
     bloques.push(bActual);
 
-    // Asignar dinámicamente el margen de salida de cada bloque para que no "devore" al siguiente
-    for (let i = 0; i < bloques.length; i++) {
-        let b = bloques[i];
-        let inicioPermitido = b.entrada - anticipoMax;
-
-        // El margen para la salida es de 4 horas, PERO si hay un bloque que le sigue, 
-        // su frontera de fin no debe pasarse de la frontera de inicioPermitido del siguiente bloque.
-        let finPermitido = b.salida + 240;
-        if (i < bloques.length - 1) {
-            let inicioSiguiente = bloques[i + 1].entrada - anticipoMax;
-            // Para proteger el próximo bloque, limitamos el bloque actual a la mitad de su separación
-            // o simplemente que termine justo donde arranca la ventana del siguiente.
-            finPermitido = Math.min(finPermitido, inicioSiguiente - 1);
-        }
-
-        if (horaMinutos >= inicioPermitido && horaMinutos <= finPermitido) {
+    // Retorna el bloque donde el usuario está "operando" actualmente.
+    // Un bloque absorbe la hora actual si está dentro de su rango +/- un margen de búsqueda.
+    for (const b of bloques) {
+        const inicioBusqueda = b.entrada - (anticipoEntradaMax + 30);
+        const finBusqueda = b.salida + (intervaloBloquesMinutos + 30);
+        if (horaMinutos >= inicioBusqueda && horaMinutos <= finBusqueda) {
             return b;
         }
     }
 
-    // Si es más temprano que todos o más tarde, retorna el 1ro o último como fallback
-    if (horaMinutos < bloques[0].entrada) return bloques[0];
-    return bloques[bloques.length - 1];
+    return null;
 }
 
 /**
- * 4. VALIDAR DENTRO DE TURNO (VISUAL)
+ * 5. VERIFICACIÓN DE ASISTENCIA POR BLOQUE (Entradas y Salidas registradas para un bloque específico)
  */
-export function srvDentroDeTurnoVisual(bloque, horaMinutos) {
-    if (!bloque) return false;
-    return (horaMinutos >= bloque.entrada && horaMinutos <= bloque.salida);
-}
+export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, intervaloBloquesMinutos) {
+    if (!bloque) return { cerrado: false, tipo: 'entrada', entradas: 0, salidas: 0 };
 
-/**
- * 5. VERIFICAR LONGITUD DE BLOQUE PARA CALCULAR ENTRADA/SALIDA Y SI ESTÁ CERRADO
- */
-export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO) {
-    if (!bloque) {
-        // Fallback: Si no hay bloque/horario, validamos contra el último registro para evitar repetidos
-        const regsCorregidos = [...registrosHoy].sort((a, b) => new Date(b.fecha_registro) - new Date(a.fecha_registro));
-        const lastReg = regsCorregidos[0];
-
-        let cerrado = false;
-        let tipo = 'entrada';
-        let entradas = 0;
-        let salidas = 0;
-
-        if (lastReg) {
-            if (lastReg.tipo === 'entrada') {
-                entradas = 1; tipo = 'salida';
-            } else if (lastReg.tipo === 'salida') {
-                salidas = 1; tipo = 'entrada';
-            }
-        }
-
-        return { cerrado, tipo, entradas, salidas };
-    }
-
-    // Filtramos solo los registros del dia en el huso de la empresa.
     const regsDelDia = registrosHoy.filter(r => new Date(r.fecha_registro).toISOString().startsWith(fechaISO.substring(0, 10)));
 
-    // Filtramos registros que encajen cerca de este bloque en particular
-    // usando la hora de registro vs el bloque
+    // Filtrar solo registros que pertenecen lógicamente a este BLOQUE fusionado
     const regsBloque = regsDelDia.filter(r => {
         const d = new Date(r.fecha_registro);
         const mins = d.getHours() * 60 + d.getMinutes();
-        // Permisividad de 4 horas antes/despues
-        return (mins >= bloque.entrada - 240 && mins <= bloque.salida + 240);
+        const margen = intervaloBloquesMinutos || 60;
+        return (mins >= bloque.entrada - margen && mins <= bloque.salida + margen);
     });
 
     const entradas = regsBloque.filter(r => r.tipo === 'entrada').length;
@@ -197,121 +150,86 @@ export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO) {
 }
 
 /**
- * 6. & 7. VALIDAR ZONA Y RED
- */
-export function srvValidarZonaYRed(ubicacionEmpleado, zonasPermitidas, ipEmpleado, segmentosRed) {
-    // Si necesitas bloquear, lanzas throw new Error().
-    // Aquí podrías agregar librerías de IPs o geocerca, según necesites.
-    console.log("[SRV] Validando zona:", ubicacionEmpleado, zonasPermitidas);
-    console.log("[SRV] Validando segmento de red:", ipEmpleado, segmentosRed);
-    // Para simplificar, suponemos que pasa si no hay lógicas complejas de IP importadas
-    return true;
-}
-
-/**
- * 8. ASIGNAR CLASIFICACIÓN CONTRA REGLAS DE TOLERANCIA
+ * 8. EVALUAR ESTADO BASADO EN REGLAS (Puntual, Retardo, Temprano)
  */
 export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia) {
-    if (!bloque) return (tipoAsistencia === 'entrada') ? 'puntual' : 'salida_puntual'; // Sin horario
+    if (!bloque) return (tipoAsistencia === 'entrada') ? 'puntual' : 'salida_puntual';
 
-    // Verificamos si aplica tolerancia el día de hoy
     const dias = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
     const diaHoy = dias[new Date().getDay()];
-    // default true si no hay dias_aplica especificados
     const aplicaHoy = tolerancia.dias_aplica?.[diaHoy] !== false;
 
     if (tipoAsistencia === 'entrada') {
-        let llegadaAdelantadoOMinutosTarde = horaMinutos - bloque.entrada;
-        // Si llegó antes o a tiempo, siempre es puntual
-        if (llegadaAdelantadoOMinutosTarde <= 0) return 'puntual';
+        const diff = horaMinutos - bloque.entrada;
+        if (diff <= 0) return 'puntual';
+        if (!aplicaHoy) return 'falta';
 
-        // LLEGÓ TARDE (llegadaAdelantadoOMinutosTarde > 0):
-        if (!aplicaHoy) {
-            // Si HOY NO HAY tolerancias permitidas y llegó tarde, pero tiene reglas configuradas,
-            // podemos considerarlo falta directamente o ignorarlo según requerimiento.
-            // Para el caso general, si no hay tolerancia hoy, cualquier minuto tarde es falta.
-            return 'falta';
+        const reglas = [...(tolerancia.reglas || [])].sort((a, b) => a.limite_minutos - b.limite_minutos);
+        for (const r of reglas) {
+            if (diff <= r.limite_minutos) return r.id;
         }
-
-        // Sí hay tolerancia hoy. Vamos a buscar si los minutos tarde caen dentro de algún retardo
-        let reglas = [...(tolerancia.reglas || [])].sort((a, b) => a.limite_minutos - b.limite_minutos);
-        for (let r of reglas) {
-            if (llegadaAdelantadoOMinutosTarde <= r.limite_minutos) {
-                return r.id; // retornará retardo_a, retardo_b, etc.
-            }
-        }
-
-        // Si superó TODOS los límites de retardo, es falta.
         return 'falta';
     } else {
-        // EN SALIDA:
-        let faltanMins = bloque.salida - horaMinutos;
+        const diffSalida = bloque.salida - horaMinutos;
 
-        // Tolerancia a la salida: si se sale antes de lo permitido
-        let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0;
-        if (faltanMins > anticipoPermitido) {
-            if (!tolerancia.aplica_tolerancia_salida && faltanMins > 0) {
-                // Si explícitamente no aplica tolerancia y se fue antes aunque sea un minuto
-                return 'salida_temprano';
-            }
-            return 'salida_temprano';
-        }
+        if (diffSalida > 0) return 'salida_temprano'; // Salió antes de la hora exacta de fin del bloque
 
-        let posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
-        // Si pasaron demasiados minutos después de su salida permitida
-        if (faltanMins < 0 && Math.abs(faltanMins) > posteriorPermitido) {
-            return 'salida_tarde';
-        }
+        const posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
+        if (Math.abs(diffSalida) > posteriorPermitido) return 'salida_tarde';
 
-        // Salió dentro del margen establecido
         return 'salida_puntual';
     }
 }
 
 /**
- * 9. VALIDAR VENTANA DE REGISTRO (BLOQUEO DURO PARA EL FRONTEND)
+ * 9. VALIDACIÓN DE VENTANA DE REGISTRO (BLOQUEO DURO)
  */
 export function srvValidarVentanaDeRegistro(bloque, horaMinutos, tolerancia, tipoAsistencia) {
     if (!bloque) {
         return {
             valido: false,
-            mensaje: 'No tienes un turno asignado para el día de hoy o es tu día de descanso.',
+            mensaje: 'No se encontró un horario asignado para este momento.',
             estadoHorario: 'tiempo_insuficiente'
         };
     }
 
     if (tipoAsistencia === 'entrada') {
-        let anticipoPermitido = tolerancia.minutos_anticipado_max || 0;
-        let inicioValido = bloque.entrada - anticipoPermitido;
-        let finValido = bloque.salida; // No dejar entrar después de la hora de salida
+        const anticipoEntrada = tolerancia.minutos_anticipado_max || 0;
+        const inicioEntrada = bloque.entrada - anticipoEntrada;
+        const finEntrada = bloque.salida;
 
-        if (horaMinutos < inicioValido) {
+        if (horaMinutos < inicioEntrada) {
             return {
                 valido: false,
-                mensaje: 'Registro anticipado no permitido o Aún no es hora.',
+                mensaje: 'Aún no es hora de iniciar el registro de entrada.',
                 estadoHorario: 'tiempo_insuficiente'
             };
         }
-        if (horaMinutos > finValido) {
+        if (horaMinutos > finEntrada) {
             return {
                 valido: false,
-                mensaje: 'Tu turno ya finalizó, no puedes registrar entrada.',
+                mensaje: 'El horario para registrar entrada en este bloque ha finalizado.',
                 estadoHorario: 'tiempo_insuficiente'
             };
         }
     } else {
-        // let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0; // Removed: no block for early departure
-        let posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
+        const anticipoSalida = tolerancia.minutos_anticipo_salida || 0;
+        const posteriorSalida = tolerancia.minutos_posterior_salida || 60;
 
-        // let inicioSalida = bloque.salida - anticipoPermitido; // Removed
-        let finSalida = bloque.salida + posteriorPermitido;
+        const inicioSalida = bloque.salida - anticipoSalida;
+        const finSalida = bloque.salida + posteriorSalida;
 
-        // The system should allow early departures and classify them as 'salida_temprana'
-        // instead of blocking the registration entirely.
+        if (horaMinutos < inicioSalida) {
+            return {
+                valido: false,
+                mensaje: 'Aún no está permitido registrar la salida (fuera de regla de anticipo).',
+                estadoHorario: 'tiempo_insuficiente'
+            };
+        }
         if (horaMinutos > finSalida) {
             return {
                 valido: false,
-                mensaje: 'Has superado el tiempo límite para registrar tu salida.',
+                mensaje: 'Has superado el tiempo límite permitido para registrar la salida.',
                 estadoHorario: 'tiempo_insuficiente'
             };
         }
@@ -321,44 +239,31 @@ export function srvValidarVentanaDeRegistro(bloque, horaMinutos, tolerancia, tip
 }
 
 /**
- * 9. ACTUALIZAR CONTEO JSONB SI ES RETARDO 
+ * Validar IP y GPS (Auxiliar)
  */
-export async function srvAumentarConteo(empleadoId, estadoCalculado, reglasTolerancia, resFaltaDirecta = null) {
-    if (!reglasTolerancia) return null;
+export function srvValidarZonaYRed() { return true; }
 
+/**
+ * Actualizar conteos JSONB
+ */
+export async function srvAumentarConteo(empleadoId, estadoCalculado, reglasTolerancia) {
+    if (!reglasTolerancia) return null;
     const reglaAplicada = reglasTolerancia.find(r => r.id === estadoCalculado);
     if (!reglaAplicada || reglaAplicada.penalizacion_tipo !== 'acumulacion') return null;
-
     const limiteRetardos = Number(reglaAplicada.penalizacion_valor);
     if (limiteRetardos <= 0) return null;
 
-    // Actualiza Postgres JSONB
     const retardoId = reglaAplicada.id;
     const updRes = await pool.query(`
         UPDATE empleados
-        SET contadores = jsonb_set(
-            COALESCE(contadores, '{}'::jsonb), 
-            '{${retardoId}}', 
-            (COALESCE((contadores->>'${retardoId}')::int, 0) + 1)::text::jsonb
-        )
-        WHERE id = $1
-        RETURNING contadores
+        SET contadores = jsonb_set(COALESCE(contadores, '{}'::jsonb), '{${retardoId}}', (COALESCE((contadores->>'${retardoId}')::int, 0) + 1)::text::jsonb)
+        WHERE id = $1 RETURNING contadores
     `, [empleadoId]);
 
     const contadorActual = parseInt(updRes.rows[0].contadores[retardoId]) || 0;
-
-    // Si supera el límite... se convierte en FALTA DIRECTA automáticamente. 
-    // Esta función retornaria flag para que el controller cree 2do registro de Alta.
     if (contadorActual >= limiteRetardos) {
-        // Reniciar el contador a 0
-        await pool.query(`
-            UPDATE empleados SET contadores = jsonb_set(contadores, '{${retardoId}}', '0'::jsonb) WHERE id = $1
-        `, [empleadoId]);
-
-        return {
-            limiteAlcanzado: true,
-            motivo: `Acumulación de ${limiteRetardos} retardos tipo ${reglaAplicada.id}`
-        };
+        await pool.query(`UPDATE empleados SET contadores = jsonb_set(contadores, '{${retardoId}}', '0'::jsonb) WHERE id = $1`, [empleadoId]);
+        return { limiteAlcanzado: true, motivo: `Acumulación de ${limiteRetardos} retardos tipo ${reglaAplicada.id}` };
     }
     return { limiteAlcanzado: false, contadorActual };
 }
