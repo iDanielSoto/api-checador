@@ -20,6 +20,7 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
     const confQuery = await pool.query(`
         SELECT t.reglas, t.permite_registro_anticipado,
                t.minutos_anticipado_max, t.dias_aplica,
+               t.aplica_tolerancia_entrada, t.aplica_tolerancia_salida,
                t.minutos_anticipo_salida, t.minutos_posterior_salida,
                c.segmentos_red, 
                COALESCE(c.intervalo_bloques_minutos, 60) as intervalo_bloques_minutos
@@ -33,6 +34,8 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
     const configuracion = confQuery.rows[0] || {
         reglas: '[]',
         permite_registro_anticipado: true,
+        aplica_tolerancia_entrada: true,
+        aplica_tolerancia_salida: false,
         minutos_anticipado_max: 60,
         minutos_anticipo_salida: 0,
         minutos_posterior_salida: 60,
@@ -243,12 +246,18 @@ export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia
     } else {
         // EN SALIDA:
         let faltanMins = bloque.salida - horaMinutos;
-        let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0;
-        let posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
 
         // Tolerancia a la salida: si se sale antes de lo permitido
-        if (faltanMins > anticipoPermitido) return 'salida_temprano';
+        let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0;
+        if (faltanMins > anticipoPermitido) {
+            if (!tolerancia.aplica_tolerancia_salida && faltanMins > 0) {
+                // Si explícitamente no aplica tolerancia y se fue antes aunque sea un minuto
+                return 'salida_temprano';
+            }
+            return 'salida_temprano';
+        }
 
+        let posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
         // Si pasaron demasiados minutos después de su salida permitida
         if (faltanMins < 0 && Math.abs(faltanMins) > posteriorPermitido) {
             return 'salida_tarde';
@@ -291,19 +300,14 @@ export function srvValidarVentanaDeRegistro(bloque, horaMinutos, tolerancia, tip
             };
         }
     } else {
-        let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0;
+        // let anticipoPermitido = tolerancia.minutos_anticipo_salida || 0; // Removed: no block for early departure
         let posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
 
-        let inicioSalida = bloque.salida - anticipoPermitido;
+        // let inicioSalida = bloque.salida - anticipoPermitido; // Removed
         let finSalida = bloque.salida + posteriorPermitido;
 
-        if (horaMinutos < inicioSalida) {
-            return {
-                valido: false,
-                mensaje: 'Salida anticipada bloqueada / Tiempo insuficiente.',
-                estadoHorario: 'tiempo_insuficiente'
-            };
-        }
+        // The system should allow early departures and classify them as 'salida_temprana'
+        // instead of blocking the registration entirely.
         if (horaMinutos > finSalida) {
             return {
                 valido: false,

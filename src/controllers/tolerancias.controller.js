@@ -103,11 +103,15 @@ export async function createTolerancia(req, res) {
             minutos_anticipado_max = 60,
             aplica_tolerancia_entrada = true,
             aplica_tolerancia_salida = false,
-            minutos_anticipo_salida = 0,
+            minutos_anticipo_salida,
+            minutos_anticipado_salida,
+            minutos_anticipo,
             minutos_posterior_salida = 60,
             dias_aplica,
             rol_id
         } = req.body;
+
+        const anticipoSalidaFinal = minutos_anticipo_salida ?? minutos_anticipado_salida ?? minutos_anticipo ?? 0;
 
         // Si no se envía nombre pero sí rol_id, tomar el nombre del rol
         if (!nombre && rol_id) {
@@ -144,7 +148,7 @@ export async function createTolerancia(req, res) {
             id, nombre, JSON.stringify(reglas),
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            minutos_anticipo_salida, minutos_posterior_salida,
+            anticipoSalidaFinal, minutos_posterior_salida,
             dias_aplica ? JSON.stringify(dias_aplica) : null,
             req.empresa_id
         ]);
@@ -186,11 +190,14 @@ export async function updateTolerancia(req, res) {
             aplica_tolerancia_entrada,
             aplica_tolerancia_salida,
             minutos_anticipo_salida,
+            minutos_anticipado_salida,
+            minutos_anticipo,
             minutos_posterior_salida,
             dias_aplica,
             rol_id
         } = req.body;
 
+        const anticipoSalidaFinal = minutos_anticipo_salida ?? minutos_anticipado_salida ?? minutos_anticipo;
         const diasJson = dias_aplica ? JSON.stringify(dias_aplica) : null;
 
         await client.query('BEGIN');
@@ -214,7 +221,7 @@ export async function updateTolerancia(req, res) {
             reglas ? JSON.stringify(reglas) : null,
             permite_registro_anticipado, minutos_anticipado_max,
             aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            minutos_anticipo_salida, minutos_posterior_salida,
+            anticipoSalidaFinal, minutos_posterior_salida,
             diasJson, id, req.empresa_id
         ]);
 
