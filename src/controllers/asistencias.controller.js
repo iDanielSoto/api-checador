@@ -49,7 +49,7 @@ async function registrarAsistenciaMovil(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos);
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida);
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });
@@ -147,7 +147,7 @@ async function registrarAsistenciaEscritorio(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos);
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida);
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });

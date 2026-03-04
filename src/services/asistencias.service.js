@@ -23,7 +23,8 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
                t.aplica_tolerancia_entrada, t.aplica_tolerancia_salida,
                t.minutos_anticipo_salida, t.minutos_posterior_salida,
                c.segmentos_red, 
-               COALESCE(c.intervalo_bloques_minutos, 60) as intervalo_bloques_minutos
+               COALESCE(c.intervalo_bloques_minutos, 60) as intervalo_bloques_minutos,
+               c.requiere_salida
         FROM tolerancias t
         INNER JOIN configuraciones c ON c.tolerancia_id = t.id
         WHERE c.id = (SELECT configuracion_id FROM empresas WHERE id = $1)
@@ -41,7 +42,8 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
         minutos_posterior_salida: 60,
         segmentos_red: '[]',
         intervalo_bloques_minutos: 60,
-        dias_aplica: '{}'
+        dias_aplica: '{}',
+        requiere_salida: true
     };
 
     let reglas = typeof configuracion.reglas === 'string' ? JSON.parse(configuracion.reglas) : configuracion.reglas;
@@ -120,7 +122,7 @@ export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloque
 /**
  * 5. VERIFICACIÓN DE ASISTENCIA POR BLOQUE (Entradas y Salidas registradas para un bloque específico)
  */
-export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, intervaloBloquesMinutos) {
+export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, intervaloBloquesMinutos, requiereSalida = true) {
     if (!bloque) return { cerrado: false, tipo: 'entrada', entradas: 0, salidas: 0 };
 
     const regsDelDia = registrosHoy.filter(r => new Date(r.fecha_registro).toISOString().startsWith(fechaISO.substring(0, 10)));
@@ -139,11 +141,19 @@ export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, interv
     let cerrado = false;
     let tipo = 'entrada';
 
-    if (entradas > 0 && salidas === 0) {
-        tipo = 'salida';
-    } else if (entradas > 0 && salidas > 0) {
-        cerrado = true;
-        tipo = 'completado';
+    if (requiereSalida === false) {
+        // Si no requiere salida, con una sola marca (entrada o salida) se cierra el bloque
+        if (entradas > 0 || salidas > 0) {
+            cerrado = true;
+            tipo = 'completado';
+        }
+    } else {
+        if (entradas > 0 && salidas === 0) {
+            tipo = 'salida';
+        } else if (entradas > 0 && salidas > 0) {
+            cerrado = true;
+            tipo = 'completado';
+        }
     }
 
     return { cerrado, tipo, entradas, salidas };

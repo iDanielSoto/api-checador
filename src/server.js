@@ -1,11 +1,12 @@
 import dotenv from 'dotenv';
 import app from './app.js';
 import { iniciarCronFaltas } from './jobs/faltasCron.js';
+import { iniciarCronSalidasNoCumplidas } from './jobs/salidasCron.js';
 import logger from './utils/logger.js';
 
 dotenv.config();
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     const line = '─'.repeat(45);
@@ -17,5 +18,7 @@ app.listen(PORT, () => {
     logger.info(`🕓 ${new Date().toLocaleString()}`);
     logger.info(`${line}\n`);
 
+    // Iniciar tareas programadas
     iniciarCronFaltas();
+    iniciarCronSalidasNoCumplidas();
 });
