@@ -30,6 +30,7 @@ async function registrarAsistenciaMovil(req, res) {
         const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
 
         const fechaLocal = new Date();
+        const fechaHoyStr = fechaLocal.getFullYear() + '-' + String(fechaLocal.getMonth() + 1).padStart(2, '0') + '-' + String(fechaLocal.getDate()).padStart(2, '0');
         const minsHoraActual = fechaLocal.getHours() * 60 + fechaLocal.getMinutes();
         const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
 
@@ -49,7 +50,7 @@ async function registrarAsistenciaMovil(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida);
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaHoyStr, tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida, tolerancia.minutos_anticipado_max);
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });
@@ -129,6 +130,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
 
         const fechaLocal = new Date();
+        const fechaHoyStr = fechaLocal.getFullYear() + '-' + String(fechaLocal.getMonth() + 1).padStart(2, '0') + '-' + String(fechaLocal.getDate()).padStart(2, '0');
         const minsHoraActual = fechaLocal.getHours() * 60 + fechaLocal.getMinutes();
         const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
 
@@ -147,7 +149,7 @@ async function registrarAsistenciaEscritorio(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaLocal.toISOString(), tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida);
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaHoyStr, tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida, tolerancia.minutos_anticipado_max);
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });

@@ -182,6 +182,7 @@ export async function updateTolerancia(req, res) {
 
     try {
         const { id } = req.params;
+        console.log('DEBUG: Actualizando Tolerancias ID:', id, req.body);
         const {
             nombre,
             reglas,
@@ -205,24 +206,29 @@ export async function updateTolerancia(req, res) {
         // 1. Actualizar tolerancia
         const resultado = await client.query(`
             UPDATE tolerancias SET
-        nombre = COALESCE($1, nombre),
-            reglas = COALESCE($2, reglas),
-            permite_registro_anticipado = COALESCE($3, permite_registro_anticipado),
-            minutos_anticipado_max = COALESCE($4, minutos_anticipado_max),
-            aplica_tolerancia_entrada = COALESCE($5, aplica_tolerancia_entrada),
-            aplica_tolerancia_salida = COALESCE($6, aplica_tolerancia_salida),
-            minutos_anticipo_salida = COALESCE($7, minutos_anticipo_salida),
-            minutos_posterior_salida = COALESCE($8, minutos_posterior_salida),
-            dias_aplica = COALESCE($9, dias_aplica)
+                nombre = $1,
+                reglas = $2,
+                permite_registro_anticipado = $3,
+                minutos_anticipado_max = $4,
+                aplica_tolerancia_entrada = $5,
+                aplica_tolerancia_salida = $6,
+                minutos_anticipo_salida = $7,
+                minutos_posterior_salida = $8,
+                dias_aplica = $9
             WHERE id = $10 AND empresa_id = $11
-        RETURNING *
-            `, [
+            RETURNING *
+        `, [
             nombre,
-            reglas ? JSON.stringify(reglas) : null,
-            permite_registro_anticipado, minutos_anticipado_max,
-            aplica_tolerancia_entrada, aplica_tolerancia_salida,
-            anticipoSalidaFinal, minutos_posterior_salida,
-            diasJson, id, req.empresa_id
+            reglas ? JSON.stringify(reglas) : '[]',
+            permite_registro_anticipado ?? true,
+            minutos_anticipado_max ?? 0,
+            aplica_tolerancia_entrada ?? true,
+            aplica_tolerancia_salida ?? false,
+            anticipoSalidaFinal ?? 0,
+            minutos_posterior_salida ?? 0,
+            diasJson || '{}',
+            id,
+            req.empresa_id
         ]);
 
         if (resultado.rows.length === 0) {

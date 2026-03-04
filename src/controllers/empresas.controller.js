@@ -66,6 +66,7 @@ export async function getMiEmpresa(req, res) {
                 e.id, e.nombre, e.identificador, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
                 e.configuracion_id,
                 c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora, c.segmentos_red, c.requiere_salida,
+                c.intervalo_bloques_minutos, c.es_mantenimiento,
                 (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
                 (SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id = e.id AND u.estado_cuenta = 'activo') as total_usuarios
             FROM empresas e

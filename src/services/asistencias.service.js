@@ -122,16 +122,26 @@ export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloque
 /**
  * 5. VERIFICACIÓN DE ASISTENCIA POR BLOQUE (Entradas y Salidas registradas para un bloque específico)
  */
-export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, intervaloBloquesMinutos, requiereSalida = true) {
+export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, intervaloBloquesMinutos, requiereSalida = true, minutosAnticipoMax = 60) {
     if (!bloque) return { cerrado: false, tipo: 'entrada', entradas: 0, salidas: 0 };
 
-    const regsDelDia = registrosHoy.filter(r => new Date(r.fecha_registro).toISOString().startsWith(fechaISO.substring(0, 10)));
+    // Filtramos registros que coincidan con la fecha (día) actual para evitar ruidos de otros días
+    const hoyStr = fechaISO.substring(0, 10);
+    const regsDelDia = registrosHoy.filter(r => {
+        const fechaReg = new Date(r.fecha_registro);
+        // Usar local date string para comparar de forma segura con la fechaISO (que suele ser local del server)
+        const regStr = fechaReg.getFullYear() + '-' +
+            String(fechaReg.getMonth() + 1).padStart(2, '0') + '-' +
+            String(fechaReg.getDate()).padStart(2, '0');
+        return regStr === hoyStr;
+    });
 
     // Filtrar solo registros que pertenecen lógicamente a este BLOQUE fusionado
     const regsBloque = regsDelDia.filter(r => {
         const d = new Date(r.fecha_registro);
         const mins = d.getHours() * 60 + d.getMinutes();
-        const margen = intervaloBloquesMinutos || 60;
+        // El margen debe cubrir la ventana de anticipo configurada para que no se pierdan marcas tempranas
+        const margen = Math.max(intervaloBloquesMinutos || 60, (minutosAnticipoMax || 0) + 30);
         return (mins >= bloque.entrada - margen && mins <= bloque.salida + margen);
     });
 
