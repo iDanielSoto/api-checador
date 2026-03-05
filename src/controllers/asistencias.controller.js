@@ -325,7 +325,7 @@ export async function getAsistenciasEmpleado(req, res) {
                             COUNT(*) FILTER(WHERE estado = 'retardo_b') as retardos_b,
                                 COUNT(*) FILTER(WHERE estado IN('falta', 'falta_por_retardo')) as faltas,
                                     COUNT(*) FILTER(WHERE estado = 'salida_puntual') as salidas_puntuales,
-                                        COUNT(*) FILTER(WHERE estado = 'salida_temprano') as salidas_tempranas
+                                        COUNT(*) FILTER(WHERE estado = 'salida_temprana') as salidas_tempranas
             FROM asistencias
             WHERE empleado_id = $1
             ${fecha_inicio ? `AND fecha_registro >= '${fecha_inicio}'` : ''}
@@ -387,7 +387,7 @@ export async function getAsistenciasHoy(req, res) {
             retardos_b: resultado.rows.filter(a => a.estado === 'retardo_b').length,
             faltas: resultado.rows.filter(a => a.estado === 'falta' || a.estado === 'falta_por_retardo').length,
             salidas_puntuales: resultado.rows.filter(a => a.estado === 'salida_puntual').length,
-            salidas_tempranas: resultado.rows.filter(a => a.estado === 'salida_temprano').length
+            salidas_tempranas: resultado.rows.filter(a => a.estado === 'salida_temprana').length
         };
         res.json({
             success: true,

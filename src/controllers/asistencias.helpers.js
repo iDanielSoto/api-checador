@@ -196,9 +196,9 @@ export function evaluarTolerancia(tipoSugerido, horaActualMinutos, bloqueActual,
         const minSalida = bloqueActual.finMin;
         const faltanMinsParaSalida = minSalida - horaActualMinutos;
 
-        // Si sale antes de hora, es salida_temprano. 
+        // Si sale antes de hora, es salida_temprana. 
         // Si sale después, es salida_puntual
-        if (faltanMinsParaSalida > 0) return 'salida_temprano';
+        if (faltanMinsParaSalida > 0) return 'salida_temprana';
         return 'salida_puntual';
     }
 }

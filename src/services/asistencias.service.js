@@ -108,10 +108,24 @@ export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloque
 
     // Retorna el bloque donde el usuario está "operando" actualmente.
     // Un bloque absorbe la hora actual si está dentro de su rango +/- un margen de búsqueda.
-    for (const b of bloques) {
-        const inicioBusqueda = b.entrada - (anticipoEntradaMax + 30);
-        const finBusqueda = b.salida + (intervaloBloquesMinutos + 30);
-        if (horaMinutos >= inicioBusqueda && horaMinutos <= finBusqueda) {
+    for (let i = 0; i < bloques.length; i++) {
+        const b = bloques[i];
+        let inicioBusqueda = b.entrada - (anticipoEntradaMax + 30);
+        let finBusqueda = b.salida + (intervaloBloquesMinutos + 30);
+
+        // Limitar la ventana de búsqueda a la mitad entre bloques para evitar solapamientos
+        if (i > 0) {
+            const bPrev = bloques[i - 1];
+            const mid = bPrev.salida + (b.entrada - bPrev.salida) / 2;
+            inicioBusqueda = Math.max(inicioBusqueda, mid);
+        }
+        if (i < bloques.length - 1) {
+            const bNext = bloques[i + 1];
+            const mid = b.salida + (bNext.entrada - b.salida) / 2;
+            finBusqueda = Math.min(finBusqueda, mid);
+        }
+
+        if (horaMinutos >= inicioBusqueda && Math.floor(horaMinutos) <= Math.floor(finBusqueda)) {
             return b;
         }
     }
@@ -181,7 +195,8 @@ export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia
 
     if (tipoAsistencia === 'entrada') {
         const diff = horaMinutos - bloque.entrada;
-        if (diff <= 0) return 'puntual';
+        if (diff < 0) return 'entrada_temprana';
+        if (diff === 0) return 'puntual';
         if (!aplicaHoy) return 'falta';
 
         const reglas = [...(tolerancia.reglas || [])].sort((a, b) => a.limite_minutos - b.limite_minutos);
@@ -192,7 +207,7 @@ export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia
     } else {
         const diffSalida = bloque.salida - horaMinutos;
 
-        if (diffSalida > 0) return 'salida_temprano'; // Salió antes de la hora exacta de fin del bloque
+        if (diffSalida > 0) return 'salida_temprana'; // Salió antes de la hora exacta de fin del bloque
 
         const posteriorPermitido = tolerancia.minutos_posterior_salida || 60;
         if (Math.abs(diffSalida) > posteriorPermitido) return 'salida_tarde';
