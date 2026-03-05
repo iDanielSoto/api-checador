@@ -750,3 +750,161 @@ info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City
 info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 12:19:53"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 12:19:53"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 12:20:03"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 12:55:59"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 12:55:59"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 12:55:59"}
+info: 📦 development {"timestamp":"2026-03-05 12:55:59"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 12:55:59"}
+info: 🕓 5/3/2026, 12:55:59 p.m. {"timestamp":"2026-03-05 12:55:59"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 12:55:59"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 12:55:59"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 12:55:59"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 12:56:00"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 12:56:14"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 1:00:00 p.m. {"timestamp":"2026-03-05 13:00:00"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 13:01:11"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 13:01:11"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 13:01:11"}
+info: 📦 development {"timestamp":"2026-03-05 13:01:11"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 13:01:11"}
+info: 🕓 5/3/2026, 1:01:11 p.m. {"timestamp":"2026-03-05 13:01:11"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 13:01:11"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 13:01:11"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 13:01:11"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 13:01:11"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 13:01:25"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 13:01:25"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 13:01:25"}
+info: 📦 development {"timestamp":"2026-03-05 13:01:25"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 13:01:25"}
+info: 🕓 5/3/2026, 1:01:25 p.m. {"timestamp":"2026-03-05 13:01:25"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 13:01:25"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 13:01:25"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 13:01:25"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 13:01:25"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 1:15:00 p.m. {"timestamp":"2026-03-05 13:15:00"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 13:32:49"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 13:33:18"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 13:44:03"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 13:44:03"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 13:44:03"}
+info: 📦 development {"timestamp":"2026-03-05 13:44:03"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 13:44:03"}
+info: 🕓 5/3/2026, 1:44:03 p.m. {"timestamp":"2026-03-05 13:44:03"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 13:44:03"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 13:44:03"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 13:44:03"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 13:44:03"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 13:44:05"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 13:44:05"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 13:44:05"}
+info: 📦 development {"timestamp":"2026-03-05 13:44:05"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 13:44:05"}
+info: 🕓 5/3/2026, 1:44:05 p.m. {"timestamp":"2026-03-05 13:44:05"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 13:44:05"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 13:44:05"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 13:44:05"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 13:44:06"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 13:44:17"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 1:45:00 p.m. {"timestamp":"2026-03-05 13:45:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 2:00:00 p.m. {"timestamp":"2026-03-05 14:00:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 2:15:00 p.m. {"timestamp":"2026-03-05 14:15:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 2:30:00 p.m. {"timestamp":"2026-03-05 14:30:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 2:45:00 p.m. {"timestamp":"2026-03-05 14:45:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 3:00:00 p.m. {"timestamp":"2026-03-05 15:00:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 3:15:00 p.m. {"timestamp":"2026-03-05 15:15:00"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 15:19:11"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 15:19:11"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 15:19:11"}
+info: 📦 development {"timestamp":"2026-03-05 15:19:11"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 15:19:11"}
+info: 🕓 5/3/2026, 3:19:11 p.m. {"timestamp":"2026-03-05 15:19:11"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 15:19:11"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 15:19:11"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 15:19:11"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 15:19:11"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 15:22:22"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 15:22:22"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 15:22:22"}
+info: 📦 development {"timestamp":"2026-03-05 15:22:22"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 15:22:22"}
+info: 🕓 5/3/2026, 3:22:22 p.m. {"timestamp":"2026-03-05 15:22:22"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 15:22:22"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 15:22:22"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 15:22:22"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 15:22:22"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 15:23:25"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 15:23:25"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 15:23:25"}
+info: 📦 development {"timestamp":"2026-03-05 15:23:25"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 15:23:25"}
+info: 🕓 5/3/2026, 3:23:25 p.m. {"timestamp":"2026-03-05 15:23:25"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 15:23:25"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 15:23:25"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 15:23:25"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 15:23:25"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 5/3/2026, 3:30:00 p.m. {"timestamp":"2026-03-05 15:30:00"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 15:39:12"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 15:39:12"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 15:39:12"}
+info: 📦 development {"timestamp":"2026-03-05 15:39:12"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 15:39:12"}
+info: 🕓 5/3/2026, 3:39:12 p.m. {"timestamp":"2026-03-05 15:39:12"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 15:39:12"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 15:39:12"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 15:39:12"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 15:39:12"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 15:40:36"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 15:40:36"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 15:40:36"}
+info: 📦 development {"timestamp":"2026-03-05 15:40:36"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 15:40:36"}
+info: 🕓 5/3/2026, 3:40:36 p.m. {"timestamp":"2026-03-05 15:40:36"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 15:40:36"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 15:40:36"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 15:40:36"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 15:40:36"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 15:43:18"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 15:43:18"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 15:43:18"}
+info: 📦 development {"timestamp":"2026-03-05 15:43:18"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 15:43:18"}
+info: 🕓 5/3/2026, 3:43:18 p.m. {"timestamp":"2026-03-05 15:43:18"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 15:43:18"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 15:43:18"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 15:43:18"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 15:43:18"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 15:43:24"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 15:43:24"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 15:43:24"}
+info: 📦 development {"timestamp":"2026-03-05 15:43:24"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 15:43:24"}
+info: 🕓 5/3/2026, 3:43:24 p.m. {"timestamp":"2026-03-05 15:43:24"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 15:43:24"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 15:43:24"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 15:43:24"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 15:43:24"}

@@ -31,6 +31,7 @@ import avisosRoutes from './routes/avisos.routes.js';
 import escritorioSyncRoutes from './routes/escritorio.sync.routes.js';
 import movilSyncRoutes from './routes/movil.sync.routes.js';
 import saasRoutes from './routes/saas.routes.js';
+import configEscritorioRoutes from './routes/configuracionesEscritorio.routes.js';
 
 const app = express();
 
@@ -84,6 +85,7 @@ app.use('/api/stream', streamRoutes);
 app.use('/api/dias-festivos', diasFestivosRoutes);
 app.use('/api/avisos', avisosRoutes);
 app.use('/api/escritorio/sync', escritorioSyncRoutes);
+app.use('/api/configuraciones-escritorio', configEscritorioRoutes);
 app.use('/api/movil', movilSyncRoutes);
 app.use('/api/saas', saasRoutes);
 
