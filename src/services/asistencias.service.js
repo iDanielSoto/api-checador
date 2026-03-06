@@ -160,11 +160,15 @@ export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, interv
         return (mins >= bloque.entrada - margenAnticipo && mins <= bloque.salida + margenPosterior);
     });
 
-    const entradas = regsBloque.filter(r => r.tipo === 'entrada').length;
-    const salidas = regsBloque.filter(r => r.tipo === 'salida').length;
+    const reqEntradas = regsBloque.filter(r => r.tipo === 'entrada');
+    const reqSalidas = regsBloque.filter(r => r.tipo === 'salida');
+
+    const entradas = reqEntradas.length;
+    const salidas = reqSalidas.length;
 
     let cerrado = false;
     let tipo = 'entrada';
+    let motivoCierre = null;
 
     if (requiereSalida === false) {
         // Si no requiere salida, con una sola marca (entrada o salida) se cierra el bloque
@@ -174,14 +178,21 @@ export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, interv
         }
     } else {
         if (entradas > 0 && salidas === 0) {
-            tipo = 'salida';
+            const estadoEntrada = reqEntradas[0].estado;
+            if (['falta', 'falta_directa', 'falta_automatica'].includes(estadoEntrada)) {
+                cerrado = true;
+                tipo = 'completado';
+                motivoCierre = 'falta_previa';
+            } else {
+                tipo = 'salida';
+            }
         } else if (entradas > 0 && salidas > 0) {
             cerrado = true;
             tipo = 'completado';
         }
     }
 
-    return { cerrado, tipo, entradas, salidas };
+    return { cerrado, tipo, entradas, salidas, motivoCierre };
 }
 
 /**

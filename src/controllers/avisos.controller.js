@@ -362,3 +362,4 @@ export async function getAvisosPublicos(req, res) {
         });
     }
 }
+// Forzar reinicio de nodemon para limpiar caché de PG después de alter table
