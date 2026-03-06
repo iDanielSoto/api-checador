@@ -35,7 +35,7 @@ async function registrarAsistenciaMovil(req, res) {
         const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
 
         // 2 & 3. Buscar bloque y validar próximo
-        const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max);
+        const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max, tolerancia.minutos_posterior_salida);
 
 
 
@@ -50,7 +50,7 @@ async function registrarAsistenciaMovil(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaHoyStr, tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida, tolerancia.minutos_anticipado_max);
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaHoyStr, tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida, tolerancia.minutos_anticipado_max, tolerancia.minutos_posterior_salida);
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });
@@ -135,7 +135,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
 
         // 2 & 3. Buscar bloque y validar próximo
-        const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max);
+        const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max, tolerancia.minutos_posterior_salida);
 
         // 4. Verificar dentro de turno (visual)
 
@@ -149,7 +149,7 @@ async function registrarAsistenciaEscritorio(req, res) {
                 return res.status(429).json({ success: false, message: 'Ya se registró una asistencia hace unos segundos. Por favor espera.' });
             }
         }
-        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaHoyStr, tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida, tolerancia.minutos_anticipado_max);
+        const { cerrado, tipo: tipoCalculado, entradas, salidas } = srvVerificarLongitudYTipo(registrosHoyQuery.rows, bloqueActual, fechaHoyStr, tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida, tolerancia.minutos_anticipado_max, tolerancia.minutos_posterior_salida);
 
         if (cerrado) {
             return res.status(400).json({ success: false, message: `El bloque de horario actual ya cuenta con entrada y salida registradas.` });

@@ -80,7 +80,7 @@ export function srvObtenerTurnosDeHoy(horario, fechaActualLocal) {
 /**
  * 2. CREACIÓN DE BLOQUES FUSIONADOS
  */
-export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloquesMinutos, anticipoEntradaMax) {
+export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloquesMinutos, anticipoEntradaMax, posteriorSalidaMax = 60) {
     if (!turnosDelDia || turnosDelDia.length === 0) return null;
 
     // Convertir a minutos y ordenar
@@ -110,8 +110,8 @@ export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloque
     // Un bloque absorbe la hora actual si está dentro de su rango +/- un margen de búsqueda.
     for (let i = 0; i < bloques.length; i++) {
         const b = bloques[i];
-        let inicioBusqueda = b.entrada - (anticipoEntradaMax + 30);
-        let finBusqueda = b.salida + (intervaloBloquesMinutos + 30);
+        let inicioBusqueda = b.entrada - (anticipoEntradaMax || 0);
+        let finBusqueda = b.salida + (posteriorSalidaMax || 60);
 
         // Limitar la ventana de búsqueda a la mitad entre bloques para evitar solapamientos
         if (i > 0) {
@@ -136,7 +136,7 @@ export function srvBuscarBloqueActual(turnosDelDia, horaMinutos, intervaloBloque
 /**
  * 5. VERIFICACIÓN DE ASISTENCIA POR BLOQUE (Entradas y Salidas registradas para un bloque específico)
  */
-export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, intervaloBloquesMinutos, requiereSalida = true, minutosAnticipoMax = 60) {
+export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, intervaloBloquesMinutos, requiereSalida = true, minutosAnticipoMax = 60, posteriorSalidaMax = 60) {
     if (!bloque) return { cerrado: false, tipo: 'entrada', entradas: 0, salidas: 0 };
 
     // Filtramos registros que coincidan con la fecha (día) actual para evitar ruidos de otros días
@@ -154,9 +154,9 @@ export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, interv
     const regsBloque = regsDelDia.filter(r => {
         const d = new Date(r.fecha_registro);
         const mins = d.getHours() * 60 + d.getMinutes();
-        // El margen debe cubrir la ventana de anticipo configurada para que no se pierdan marcas tempranas
-        const margen = Math.max(intervaloBloquesMinutos || 60, (minutosAnticipoMax || 0) + 30);
-        return (mins >= bloque.entrada - margen && mins <= bloque.salida + margen);
+        const margenAnticipo = minutosAnticipoMax || 0;
+        const margenPosterior = posteriorSalidaMax || 60;
+        return (mins >= bloque.entrada - margenAnticipo && mins <= bloque.salida + margenPosterior);
     });
 
     const entradas = regsBloque.filter(r => r.tipo === 'entrada').length;

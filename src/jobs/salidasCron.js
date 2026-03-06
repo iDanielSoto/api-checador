@@ -102,11 +102,15 @@ async function revisarSalidasNoCumplidas() {
                         const deptoRes = await pool.query(`SELECT departamento_id FROM empleados_departamentos WHERE empleado_id = $1 AND es_activo = true LIMIT 1`, [emp.empleado_id]);
                         const deptoId = deptoRes.rows[0]?.departamento_id || null;
 
-                        // Registrar salida no cumplida
+                        // Calcular la fecha exacta de salida esperada (fin de turno del bloque)
+                        const fechaExpectedSalida = new Date(ahora);
+                        fechaExpectedSalida.setHours(Math.floor(bloque.salida / 60), bloque.salida % 60, 0, 0);
+
+                        // Registrar salida no cumplida con su hora original exacta
                         await pool.query(`
-                            INSERT INTO asistencias (id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id)
-                            VALUES ($1, 'salida_no_cumplida', 'sistema', $2, $3, 'salida', $4)
-                        `, [id, emp.empleado_id, deptoId, emp.empresa_id]);
+                            INSERT INTO asistencias (id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro)
+                            VALUES ($1, 'salida_no_cumplida', 'sistema', $2, $3, 'salida', $4, $5)
+                        `, [id, emp.empleado_id, deptoId, emp.empresa_id, fechaExpectedSalida]);
 
                         // Evento
                         const eventoId = await generateId(ID_PREFIXES.EVENTO);
