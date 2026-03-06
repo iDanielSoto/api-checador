@@ -964,3 +964,15 @@ info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City
 info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 22:49:41"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 22:49:41"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 22:49:48"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-05 22:50:57"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-05 22:50:57"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-05 22:50:57"}
+info: 📦 development {"timestamp":"2026-03-05 22:50:57"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-05 22:50:57"}
+info: 🕓 5/3/2026, 10:50:57 p.m. {"timestamp":"2026-03-05 22:50:57"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-05 22:50:57"}
+info: [CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City) {"timestamp":"2026-03-05 22:50:57"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-05 22:50:57"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-05 22:50:57"}
