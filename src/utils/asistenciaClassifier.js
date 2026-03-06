@@ -112,3 +112,67 @@ export function calcularNotasMalas(totalRetardosA, totalRetardosB) {
     const notasPorB = totalRetardosB;                  // 1 nota por Retardo B   (Art. 80b)
     return notasPorA + notasPorB;
 }
+
+/**
+ * Valida que un arreglo de reglas de tolerancia no tenga choques lógicos.
+ * 
+ * Verifica:
+ * 1. Que no haya límites de minutos duplicados.
+ * 2. Que no haya estados (IDs) duplicados.
+ * 3. Congruencia de severidad (no puede haber un estado más leve a los 30 min que el que había a los 10 min).
+ * 
+ * @param {Array} reglas Arreglo de reglas [{id: '...', limite_minutos: ...}]
+ * @returns {{ valido: boolean, mensaje?: string }}
+ */
+export function validarReglasTolerancia(reglas) {
+    if (!reglas || !Array.isArray(reglas) || reglas.length === 0) return { valido: true };
+
+    // Definir jerarquía de severidad (mayor peso = peor consecuencia)
+    const jerarquia = {
+        'puntual': 0,
+        'retardo_a': 1,
+        'retardo_b': 2,
+        'retardo_c': 3,
+        'falta': 4,
+        'falta_por_retardo': 5,
+        'falta_directa': 6,
+        'falta_automatica': 7
+    };
+
+    // Ordenamos una copia temporal
+    const reglasOrdenadas = [...reglas].sort((a, b) => a.limite_minutos - b.limite_minutos);
+
+    let maxJerarquiaActual = -1;
+    let minutosVistos = new Set();
+    let idsVistos = new Set();
+
+    for (let i = 0; i < reglasOrdenadas.length; i++) {
+        const regla = reglasOrdenadas[i];
+
+        // 1. Validar que no haya minutos duplicados
+        if (minutosVistos.has(regla.limite_minutos)) {
+            return { valido: false, mensaje: `Conflicto de tiempo: Múltiples reglas definidas para los ${regla.limite_minutos} minutos.` };
+        }
+        minutosVistos.add(regla.limite_minutos);
+
+        // 2. Validar que no haya estados duplicados
+        if (idsVistos.has(regla.id)) {
+            return { valido: false, mensaje: `Estado duplicado: Solo puede haber una regla para el estado '${regla.id}'.` };
+        }
+        idsVistos.add(regla.id);
+
+        // 3. Validar choque de severidad (congruencia lógica)
+        const pesoActual = jerarquia[regla.id] !== undefined ? jerarquia[regla.id] : 0;
+
+        if (pesoActual < maxJerarquiaActual) {
+            return {
+                valido: false,
+                mensaje: `Choque lógico: A los ${regla.limite_minutos} minutos se asigna '${regla.id}' después de tener un estado más severo en menos minutos.`
+            };
+        }
+
+        maxJerarquiaActual = pesoActual;
+    }
+
+    return { valido: true };
+}

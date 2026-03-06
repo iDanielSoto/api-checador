@@ -5,6 +5,85 @@ import { addClient, broadcast } from '../utils/sse.js';
 import { ejecutarValidacionesRed } from '../utils/networkValidator.js';
 
 /**
+ * POST /api/solicitudes/validar-afiliacion
+ * Endpoint público para validar afiliación móvil.
+ * Valida que la empresa exista, esté activa y que la IP del dispositivo esté
+ * dentro de un segmento de red permitido (si está configurado).
+ */
+export async function validarAfiliacion(req, res) {
+    try {
+        const { identificador, ip } = req.body;
+        const fallbackIp = ip || req.ip;
+
+        if (!identificador) {
+            return res.status(400).json({
+                success: false,
+                message: 'El identificador de la empresa es requerido'
+            });
+        }
+
+        // Buscar la empresa por identificador y cargar su configuración de red
+        const resultado = await pool.query(`
+            SELECT 
+                e.id, 
+                e.nombre, 
+                e.es_activo,
+                c.segmentos_red
+            FROM empresas e
+            LEFT JOIN configuraciones c ON c.id = e.configuracion_id
+            WHERE e.identificador = $1
+        `, [identificador]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Empresa no encontrada'
+            });
+        }
+
+        const empresa = resultado.rows[0];
+
+        if (!empresa.es_activo) {
+            return res.status(403).json({
+                success: false,
+                message: 'La empresa no está activa en el sistema'
+            });
+        }
+
+        // Parsear segmentos_red si viene como string
+        let segmentos_red = empresa.segmentos_red;
+        if (typeof segmentos_red === 'string') {
+            try { segmentos_red = JSON.parse(segmentos_red); } catch { segmentos_red = []; }
+        }
+
+        // Ejecutar validaciones de red
+        const validacionRed = ejecutarValidacionesRed({
+            ip: fallbackIp,
+            segmentosRed: segmentos_red || []
+        });
+
+        res.json({
+            success: true,
+            data: {
+                empresa: {
+                    id: empresa.id,
+                    nombre: empresa.nombre,
+                    es_activo: empresa.es_activo
+                },
+                validacionRed
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en validarAfiliacion:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error interno del servidor al validar afiliación'
+        });
+    }
+}
+
+/**
  * GET /api/solicitudes
  * Obtiene todas las solicitudes de dispositivos
  */

@@ -64,7 +64,7 @@ export async function getMiEmpresa(req, res) {
         const resultado = await pool.query(`
             SELECT
                 e.id, e.nombre, e.identificador, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
-                e.configuracion_id,
+                e.configuracion_id, e.configuracion_reportes,
                 c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora, c.segmentos_red, c.requiere_salida,
                 c.intervalo_bloques_minutos, c.es_mantenimiento,
                 (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
@@ -92,7 +92,7 @@ export async function getMiEmpresa(req, res) {
  */
 export async function updateMiEmpresa(req, res) {
     try {
-        const { nombre, logo, telefono, correo } = req.body;
+        const { nombre, logo, telefono, correo, configuracion_reportes } = req.body;
 
         if (!nombre?.trim()) {
             return res.status(400).json({ success: false, message: 'El nombre de la empresa es requerido' });
@@ -103,10 +103,11 @@ export async function updateMiEmpresa(req, res) {
                 nombre = $1,
                 logo = $2,
                 telefono = $3,
-                correo = $4
-            WHERE id = $5
+                correo = $4,
+                configuracion_reportes = COALESCE($5::jsonb, configuracion_reportes)
+            WHERE id = $6
             RETURNING *
-        `, [nombre.trim(), logo || null, telefono || null, correo || null, req.empresa_id]);
+        `, [nombre.trim(), logo || null, telefono || null, correo || null, configuracion_reportes ? JSON.stringify(configuracion_reportes) : null, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Empresa no encontrada' });

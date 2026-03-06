@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
+import { validarReglasTolerancia } from '../utils/asistenciaClassifier.js';
 
 /**
  * GET /api/tolerancias
@@ -129,6 +130,17 @@ export async function createTolerancia(req, res) {
             });
         }
 
+        if (reglas && Array.isArray(reglas)) {
+            const validacion = validarReglasTolerancia(reglas);
+            if (!validacion.valido) {
+                client.release();
+                return res.status(400).json({
+                    success: false,
+                    message: validacion.mensaje
+                });
+            }
+        }
+
         await client.query('BEGIN');
 
         const id = await generateId(ID_PREFIXES.TOLERANCIA);
@@ -200,6 +212,17 @@ export async function updateTolerancia(req, res) {
 
         const anticipoSalidaFinal = minutos_anticipo_salida ?? minutos_anticipado_salida ?? minutos_anticipo;
         const diasJson = dias_aplica ? JSON.stringify(dias_aplica) : null;
+
+        if (reglas && Array.isArray(reglas)) {
+            const validacion = validarReglasTolerancia(reglas);
+            if (!validacion.valido) {
+                client.release();
+                return res.status(400).json({
+                    success: false,
+                    message: validacion.mensaje
+                });
+            }
+        }
 
         await client.query('BEGIN');
 

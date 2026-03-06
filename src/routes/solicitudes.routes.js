@@ -9,7 +9,8 @@ import {
     verificarSolicitud,
     actualizarAPendiente,
     streamSolicitudes,
-    cancelarSolicitud
+    cancelarSolicitud,
+    validarAfiliacion
 } from '../controllers/solicitudes.controller.js';
 import { verificarAutenticacion, autenticacionOpcional } from '../middleware/auth.middleware.js';
 import { verificarEmpresa } from '../middleware/tenant.middleware.js';
@@ -21,6 +22,7 @@ const router = Router();
 router.get('/stream', streamSolicitudes);
 
 // Rutas públicas (dispositivos sin autenticación)
+router.post('/validar-afiliacion', validarAfiliacion); // Validar afiliación y red
 router.post('/', createSolicitud);  // Crear solicitud desde dispositivo
 router.delete('/:id', cancelarSolicitud);  // Cancelar solicitud por el usuario
 router.get('/verificar/:token', verificarSolicitud);  // Verificar estado por token

@@ -2,6 +2,8 @@ import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { broadcast } from '../utils/sse.js';
 
+import { getMotorConfigurado, getMotorReglas } from '../utils/motores_reglas/index.js';
+
 import {
     srvBuscarConfiguracion,
     srvObtenerTurnosDeHoy,
@@ -55,7 +57,7 @@ async function registrarAsistenciaMovil(req, res) {
         if (cerrado) {
             let mensajeCierre = `El bloque de horario actual ya cuenta con entrada y salida registradas.`;
             if (motivoCierre === 'falta_previa') {
-                mensajeCierre = `Acceso denegado: Se te ha registrado una falta directa en este turno. No puedes registrar salida.`;
+                mensajeCierre = `Acceso denegado: Se te ha registrado una falta directa en este turno.No puedes registrar salida.`;
             }
             return res.status(400).json({ success: false, message: mensajeCierre });
         }
@@ -94,14 +96,14 @@ async function registrarAsistenciaMovil(req, res) {
         // -- REGISTRO DB --
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         await pool.query(
-            `INSERT INTO asistencias (id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')}}` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id]
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')} } ` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
-            `INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES ($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
+            `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
         );
 
         // 9. Aumentar conteo (si es retardo)
@@ -118,7 +120,7 @@ async function registrarAsistenciaMovil(req, res) {
         }
 
         broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
-        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal } });
+        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `, data: { id, tipo: tipoFinal, estado: estadoFinal } });
 
     } catch (error) {
         console.error(error);
@@ -158,7 +160,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         if (cerrado) {
             let mensajeCierre = `El bloque de horario actual ya cuenta con entrada y salida registradas.`;
             if (motivoCierre === 'falta_previa') {
-                mensajeCierre = `Acceso denegado: Se te ha registrado una falta directa en este turno. No puedes registrar salida.`;
+                mensajeCierre = `Acceso denegado: Se te ha registrado una falta directa en este turno.No puedes registrar salida.`;
             }
             return res.status(400).json({ success: false, message: mensajeCierre });
         }
@@ -191,14 +193,14 @@ async function registrarAsistenciaEscritorio(req, res) {
         // -- REGISTRO DB --
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         await pool.query(
-            `INSERT INTO asistencias (id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, $2, $3, $4, $5, $6, $7)`,
             [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
-            `INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES ($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal}`, `${empleado.nombre} registró ${tipoFinal}`, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
+            `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
         );
 
         // 7. Aumentar conteo (si es retardo)
@@ -215,7 +217,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         }
 
         broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
-        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal}`, data: { id, tipo: tipoFinal, estado: estadoFinal } });
+        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `, data: { id, tipo: tipoFinal, estado: estadoFinal } });
 
     } catch (error) {
         console.error(error);
@@ -235,25 +237,25 @@ export async function getAsistencias(req, res) {
             offset = 0
         } = req.query;
         let query = `
-                SELECT
-                a.id,
-                    a.estado,
-                    a.dispositivo_origen,
-                    a.ubicacion,
-                    a.fecha_registro,
-                    a.empleado_id,
-                    a.departamento_id,
-                    a.tipo,
-                    u.nombre as empleado_nombre,
-                    u.usuario as empleado_usuario,
-                    u.foto as empleado_foto,
-                    d.nombre as departamento_nombre
+SELECT
+a.id,
+    a.estado,
+    a.dispositivo_origen,
+    a.ubicacion,
+    a.fecha_registro,
+    a.empleado_id,
+    a.departamento_id,
+    a.tipo,
+    u.nombre as empleado_nombre,
+    u.usuario as empleado_usuario,
+    u.foto as empleado_foto,
+    d.nombre as departamento_nombre
             FROM asistencias a
             INNER JOIN empleados e ON e.id = a.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN departamentos d ON d.id = a.departamento_id
             WHERE a.empresa_id = $1
-                    `;
+    `;
         const params = [req.empresa_id];
         let paramIndex = 2;
         if (empleado_id) {
@@ -262,7 +264,7 @@ export async function getAsistencias(req, res) {
         }
         if (departamento_id) {
             query += ` AND e.id IN(
-                        SELECT empleado_id FROM empleados_departamentos
+        SELECT empleado_id FROM empleados_departamentos
                 WHERE departamento_id = $${paramIndex++} AND es_activo = true
     )`;
             params.push(departamento_id);
@@ -299,19 +301,19 @@ export async function getAsistenciasEmpleado(req, res) {
         const { empleadoId } = req.params;
         const { fecha_inicio, fecha_fin } = req.query;
         let query = `
-            SELECT
-            a.id,
-                a.estado,
-                a.dispositivo_origen,
-                a.ubicacion,
-                a.fecha_registro,
-                a.departamento_id,
-                a.tipo,
-                d.nombre as departamento_nombre
+SELECT
+a.id,
+    a.estado,
+    a.dispositivo_origen,
+    a.ubicacion,
+    a.fecha_registro,
+    a.departamento_id,
+    a.tipo,
+    d.nombre as departamento_nombre
             FROM asistencias a
             LEFT JOIN departamentos d ON d.id = a.departamento_id
             WHERE a.empleado_id = $1
-                `;
+    `;
         const params = [empleadoId];
         let paramIndex = 2;
         if (fecha_inicio) {
@@ -325,20 +327,20 @@ export async function getAsistenciasEmpleado(req, res) {
         query += ` ORDER BY a.fecha_registro DESC`;
         const resultado = await pool.query(query, params);
         const stats = await pool.query(`
-            SELECT
-            COUNT(*) as total,
-                COUNT(*) FILTER(WHERE estado = 'puntual') as puntuales,
-                    COUNT(*) FILTER(WHERE estado IN('retardo_a', 'retardo_b')) as retardos,
-                        COUNT(*) FILTER(WHERE estado = 'retardo_a') as retardos_a,
-                            COUNT(*) FILTER(WHERE estado = 'retardo_b') as retardos_b,
-                                COUNT(*) FILTER(WHERE estado IN('falta', 'falta_por_retardo')) as faltas,
-                                    COUNT(*) FILTER(WHERE estado = 'salida_puntual') as salidas_puntuales,
-                                        COUNT(*) FILTER(WHERE estado = 'salida_temprana') as salidas_tempranas
+SELECT
+COUNT(*) as total,
+    COUNT(*) FILTER(WHERE estado = 'puntual') as puntuales,
+        COUNT(*) FILTER(WHERE estado IN('retardo_a', 'retardo_b')) as retardos,
+            COUNT(*) FILTER(WHERE estado = 'retardo_a') as retardos_a,
+                COUNT(*) FILTER(WHERE estado = 'retardo_b') as retardos_b,
+                    COUNT(*) FILTER(WHERE estado IN('falta', 'falta_por_retardo')) as faltas,
+                        COUNT(*) FILTER(WHERE estado = 'salida_puntual') as salidas_puntuales,
+                            COUNT(*) FILTER(WHERE estado = 'salida_temprana') as salidas_tempranas
             FROM asistencias
             WHERE empleado_id = $1
             ${fecha_inicio ? `AND fecha_registro >= '${fecha_inicio}'` : ''}
             ${fecha_fin ? `AND fecha_registro <= '${fecha_fin}'` : ''}
-            `, [empleadoId]);
+`, [empleadoId]);
         res.json({
             success: true,
             data: resultado.rows,
@@ -358,31 +360,31 @@ export async function getAsistenciasHoy(req, res) {
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
         let query = `
-            SELECT
-            a.id,
-                a.estado,
-                a.dispositivo_origen,
-                a.fecha_registro,
-                a.empresa_id,
-                a.tipo,
-                e.id as empleado_id,
-                a.departamento_id,
-                u.nombre as empleado_nombre,
-                u.usuario as empleado_usuario,
-                u.foto as empleado_foto,
-                d.nombre as departamento_nombre
+SELECT
+a.id,
+    a.estado,
+    a.dispositivo_origen,
+    a.fecha_registro,
+    a.empresa_id,
+    a.tipo,
+    e.id as empleado_id,
+    a.departamento_id,
+    u.nombre as empleado_nombre,
+    u.usuario as empleado_usuario,
+    u.foto as empleado_foto,
+    d.nombre as departamento_nombre
             FROM asistencias a
             INNER JOIN empleados e ON e.id = a.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN departamentos d ON d.id = a.departamento_id
             WHERE DATE(a.fecha_registro) = DATE($1)
-                `;
+    `;
         const params = [hoy];
         if (departamento_id) {
             query += ` AND e.id IN(
-                    SELECT empleado_id FROM empleados_departamentos
+        SELECT empleado_id FROM empleados_departamentos
                 WHERE departamento_id = $2 AND es_activo = true
-                )`;
+    )`;
             params.push(departamento_id);
         }
         query += ` ORDER BY a.fecha_registro DESC`;
@@ -447,8 +449,8 @@ export async function registrarAsistenciaManual(req, res) {
         // ── Obtener datos del empleado + departamento + tolerancia ──
         const empleadoQuery = await client.query(`
             SELECT e.id, u.nombre, u.empresa_id, e.horario_id, h.configuracion,
-                   ed.departamento_id,
-                   t.reglas
+    ed.departamento_id,
+    t.reglas
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN horarios h ON h.id = e.horario_id
@@ -474,7 +476,7 @@ export async function registrarAsistenciaManual(req, res) {
 
         // ── Si usa horario, obtener horas del día correspondiente ──
         if (usar_horario) {
-            const fechaObj = new Date(`${fecha}T12:00:00`); // Mediodía para evitar desfase UTC
+            const fechaObj = new Date(`${fecha} T12:00:00`); // Mediodía para evitar desfase UTC
             const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
             const diaSemana = diasSemana[fechaObj.getDay()];
 
@@ -500,7 +502,7 @@ export async function registrarAsistenciaManual(req, res) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({
                     success: false,
-                    message: `No se encontró horario configurado para el día ${diaSemana}`
+                    message: `No se encontró horario configurado para el día ${diaSemana} `
                 });
             }
 
@@ -517,8 +519,8 @@ export async function registrarAsistenciaManual(req, res) {
             SELECT id FROM asistencias
             WHERE empleado_id = $1
               AND tipo = 'entrada'
-              AND fecha_registro::date = $2
-              AND ABS(EXTRACT(EPOCH FROM (fecha_registro::time - $3::time)) / 60) < 60
+              AND fecha_registro:: date = $2
+              AND ABS(EXTRACT(EPOCH FROM(fecha_registro:: time - $3:: time)) / 60) < 60
             LIMIT 1
         `, [empleado_id, fecha, `${entradaFinal}:00`]);
 
@@ -526,7 +528,7 @@ export async function registrarAsistenciaManual(req, res) {
             await client.query('ROLLBACK');
             return res.status(400).json({
                 success: false,
-                message: `Ya existe un registro de entrada para este turno (${entradaFinal}) en ${fecha}`
+                message: `Ya existe un registro de entrada para este turno(${entradaFinal}) en ${fecha} `
             });
         }
 
@@ -544,7 +546,7 @@ export async function registrarAsistenciaManual(req, res) {
         // Si NO usa horario (horas manuales), intentar obtener horario para clasificar
         if (!usar_horario && !horaHorarioEntrada) {
             // Buscar la hora programada del horario para ese día
-            const fechaObj = new Date(`${fecha}T12:00:00`);
+            const fechaObj = new Date(`${fecha} T12:00:00`);
             const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
             const diaSemana = diasSemana[fechaObj.getDay()];
 
@@ -594,15 +596,15 @@ export async function registrarAsistenciaManual(req, res) {
         const idEntrada = await generateId(ID_PREFIXES.ASISTENCIA);
         await client.query(`
             INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion)
-            VALUES($1, $2, 'manual', $3, $4, $5, 'entrada', $6, '{"Registro Manual Admin"}')
-        `, [idEntrada, estadoEntrada, fechaEntrada, empleado_id, deptoId, empresaId]);
+VALUES($1, $2, 'manual', $3, $4, $5, 'entrada', $6, '{"Registro Manual Admin"}')
+    `, [idEntrada, estadoEntrada, fechaEntrada, empleado_id, deptoId, empresaId]);
 
         // ── Insertar Salida ──
         const idSalida = await generateId(ID_PREFIXES.ASISTENCIA);
         await client.query(`
             INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion)
-            VALUES($1, 'salida_puntual', 'manual', $2, $3, $4, 'salida', $5, '{"Registro Manual Admin"}')
-        `, [idSalida, fechaSalida, empleado_id, deptoId, empresaId]);
+VALUES($1, 'salida_puntual', 'manual', $2, $3, $4, 'salida', $5, '{"Registro Manual Admin"}')
+    `, [idSalida, fechaSalida, empleado_id, deptoId, empresaId]);
 
         // ── Insertar Evento ──
         const idEvento = await generateId(ID_PREFIXES.EVENTO);
@@ -610,11 +612,11 @@ export async function registrarAsistenciaManual(req, res) {
 
         await client.query(`
             INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles)
-            VALUES($1, $2, $3, 'asistencia_manual', 'alta', $4, $5)
+VALUES($1, $2, $3, 'asistencia_manual', 'alta', $4, $5)
         `, [
             idEvento,
             'Asistencia Manual Registrada',
-            `Se registró asistencia manual para ${empleado.nombre} el día ${fecha}. Estado: ${estadoEntrada}. Motivo: ${motivo || 'Sin motivo'}`,
+            `Se registró asistencia manual para ${empleado.nombre} el día ${fecha}.Estado: ${estadoEntrada}.Motivo: ${motivo || 'Sin motivo'} `,
             empleado_id,
             JSON.stringify({
                 fecha,
@@ -641,7 +643,7 @@ export async function registrarAsistenciaManual(req, res) {
 
         res.status(201).json({
             success: true,
-            message: `Asistencia registrada como ${estadoEntrada.replace('_', ' ')}`,
+            message: `Asistencia registrada como ${estadoEntrada.replace('_', ' ')} `,
             data: {
                 entrada: { id: idEntrada, hora: entradaFinal, estado: estadoEntrada },
                 salida: { id: idSalida, hora: salidaFinal }
@@ -683,65 +685,17 @@ export async function getEquivalenciasEmpleado(req, res) {
         const empQuery = await pool.query('SELECT u.empresa_id FROM empleados e JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1 LIMIT 1', [empleadoId]);
         const empresa_id = empQuery.rows[0]?.empresa_id;
 
-        let eqA = 10;
-        let eqB = 5;
+        const motorNombre = await getMotorConfigurado(empresa_id);
+        const motor = getMotorReglas(motorNombre);
 
-        if (empresa_id) {
-            const { tolerancia } = await srvBuscarConfiguracion(empleadoId, empresa_id);
-            eqA = tolerancia.reglas?.find(r => r.id === 'retardo_a')?.penalizacion_valor ?? 10;
-            eqB = tolerancia.reglas?.find(r => r.id === 'retardo_b')?.penalizacion_valor ?? 5;
-        }
-
-        // Conteos del período
-        const statsRes = await pool.query(`
-            SELECT
-                COUNT(*) FILTER (WHERE estado = 'retardo_a')                           AS retardos_a,
-                COUNT(*) FILTER (WHERE estado = 'retardo_b')                           AS retardos_b,
-                COUNT(*) FILTER (WHERE estado IN ('falta', 'falta_por_retardo')
-                                  AND dispositivo_origen != 'sistema')                 AS faltas_directas,
-                COUNT(*) FILTER (WHERE estado IN ('falta', 'falta_por_retardo')
-                                  AND dispositivo_origen = 'sistema')                  AS faltas_por_acumulacion
-            FROM asistencias
-            WHERE empleado_id = $1
-              AND tipo = 'entrada'
-              AND fecha_registro::date BETWEEN $2 AND $3
-        `, [empleadoId, inicio, fin]);
-
-        const s = statsRes.rows[0];
-        const retA = parseInt(s.retardos_a) || 0;
-        const retB = parseInt(s.retardos_b) || 0;
-        const faltasPorA = Math.floor(retA / eqA);
-        const faltasPorB = Math.floor(retB / eqB);
-        const faltasEquivalentes = faltasPorA + faltasPorB;
-        const faltasDirectas = parseInt(s.faltas_directas) || 0;
-        const faltasTotal = faltasDirectas + faltasEquivalentes + (parseInt(s.faltas_por_acumulacion) || 0);
-
-        // Notas malas (Art. 80): 1 nota c/2 RetA, 1 nota por RetB
-        const notasMalas = Math.floor(retA / 2) + retB;
+        const equivalenciasData = await motor.calcularEquivalencias(empleadoId, empresa_id, inicio, fin);
 
         res.json({
             success: true,
             data: {
                 periodo: { inicio, fin },
-                retardos_a: retA,
-                retardos_b: retB,
-                faltas_directas: faltasDirectas,
-                faltas_por_acumulacion_sistema: parseInt(s.faltas_por_acumulacion) || 0,
-                faltas_equivalentes_por_retardos: faltasEquivalentes,
-                faltas_totales: faltasTotal,
-                notas_malas_acumuladas: notasMalas,
-                configuracion_equivalencias: {
-                    retardos_a_por_falta: eqA,
-                    retardos_b_por_falta: eqB,
-                    art_80a_retardos_a_por_nota: 2,
-                    art_80b_retardos_b_por_nota: 1
-                },
-                desglose_equivalencias: {
-                    faltas_por_retardos_a: faltasPorA,
-                    retardos_a_restantes: retA % eqA,
-                    faltas_por_retardos_b: faltasPorB,
-                    retardos_b_restantes: retB % eqB
-                }
+                motor_utilizado: motorNombre,
+                ...equivalenciasData
             }
         });
     } catch (error) {
