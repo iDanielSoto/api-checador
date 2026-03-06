@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import { validarSegmentoRed } from '../utils/networkValidator.js';
 
 /**
  * 1. BUSCAR REGLAS DE TOLERANCIA Y CONFIGURACIÓN
@@ -274,9 +275,20 @@ export function srvValidarVentanaDeRegistro(bloque, horaMinutos, tolerancia, tip
 }
 
 /**
- * Validar IP y GPS (Auxiliar)
+ * 10. Validar IP y GPS (Auxiliar para Registro Movil)
  */
-export function srvValidarZonaYRed() { return true; }
+export function srvValidarZonaYRed(ubicacion, reqGps, reqIp, segmentosRed) {
+    if (segmentosRed && segmentosRed.length > 0) {
+        const checkRed = validarSegmentoRed(reqIp, segmentosRed);
+        if (!checkRed.valido && checkRed.advertencia) {
+            // Rechaza el intento tirando una excepcion que captura el controller (linea ~83)
+            throw new Error(`Acceso denegado. ${checkRed.advertencia.mensaje}`);
+        }
+    }
+
+    // GPS se validaría aquí en el futuro usando validarGPS de networkValidator.js
+    return true;
+}
 
 /**
  * Actualizar conteos JSONB
