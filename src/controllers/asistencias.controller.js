@@ -26,12 +26,19 @@ export async function registrarAsistencia(req, res) {
 
 async function registrarAsistenciaMovil(req, res) {
     try {
-        const { empleado_id, dispositivo_origen, ubicacion, departamento_id, tipo: tipoForzado } = req.body;
+        const { empleado_id, dispositivo_origen, ubicacion, departamento_id, tipo: tipoForzado, fecha_captura } = req.body;
 
         // 1. Buscar reglas de tolerancia
         const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
 
-        const fechaLocal = new Date();
+        let fechaLocal = new Date();
+        if (fecha_captura) {
+            const fCaptura = new Date(fecha_captura);
+            const ahora = new Date();
+            if (fCaptura <= new Date(ahora.getTime() + 5 * 60000)) {
+                fechaLocal = fCaptura;
+            }
+        }
         const fechaHoyStr = fechaLocal.getFullYear() + '-' + String(fechaLocal.getMonth() + 1).padStart(2, '0') + '-' + String(fechaLocal.getDate()).padStart(2, '0');
         const minsHoraActual = fechaLocal.getHours() * 60 + fechaLocal.getMinutes();
         const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
@@ -96,8 +103,8 @@ async function registrarAsistenciaMovil(req, res) {
         // -- REGISTRO DB --
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         await pool.query(
-            `INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')} } ` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id]
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')} } ` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaLocal]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
@@ -111,15 +118,15 @@ async function registrarAsistenciaMovil(req, res) {
         if (penalizacion && penalizacion.limiteAlcanzado) {
             // Se debe registrar la falta
             const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
-            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4)`, [idFalta, empleado_id, departamento_id, req.empresa_id]);
+            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4, $5)`, [idFalta, empleado_id, departamento_id, req.empresa_id, fechaLocal]);
 
             const evFalta = await generateId(ID_PREFIXES.EVENTO);
             await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo })]);
 
-            broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: new Date() });
+            broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: fechaLocal });
         }
 
-        broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
+        broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: fechaLocal });
         res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `, data: { id, tipo: tipoFinal, estado: estadoFinal } });
 
     } catch (error) {
@@ -130,12 +137,19 @@ async function registrarAsistenciaMovil(req, res) {
 
 async function registrarAsistenciaEscritorio(req, res) {
     try {
-        const { empleado_id, dispositivo_origen, departamento_id, tipo: tipoForzado } = req.body;
+        const { empleado_id, dispositivo_origen, departamento_id, tipo: tipoForzado, fecha_captura } = req.body;
 
         // 1. Buscar reglas de tolerancia
         const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
 
-        const fechaLocal = new Date();
+        let fechaLocal = new Date();
+        if (fecha_captura) {
+            const fCaptura = new Date(fecha_captura);
+            const ahora = new Date();
+            if (fCaptura <= new Date(ahora.getTime() + 5 * 60000)) {
+                fechaLocal = fCaptura;
+            }
+        }
         const fechaHoyStr = fechaLocal.getFullYear() + '-' + String(fechaLocal.getMonth() + 1).padStart(2, '0') + '-' + String(fechaLocal.getDate()).padStart(2, '0');
         const minsHoraActual = fechaLocal.getHours() * 60 + fechaLocal.getMinutes();
         const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
@@ -193,8 +207,8 @@ async function registrarAsistenciaEscritorio(req, res) {
         // -- REGISTRO DB --
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
         await pool.query(
-            `INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, $2, $3, $4, $5, $6, $7)`,
-            [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id]
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaLocal]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
@@ -208,15 +222,15 @@ async function registrarAsistenciaEscritorio(req, res) {
         if (penalizacion && penalizacion.limiteAlcanzado) {
             // Se debe registrar la falta
             const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
-            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4)`, [idFalta, empleado_id, departamento_id, req.empresa_id]);
+            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4, $5)`, [idFalta, empleado_id, departamento_id, req.empresa_id, fechaLocal]);
 
             const evFalta = await generateId(ID_PREFIXES.EVENTO);
             await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo })]);
 
-            broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: new Date() });
+            broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: fechaLocal });
         }
 
-        broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: new Date() });
+        broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: fechaLocal });
         res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `, data: { id, tipo: tipoFinal, estado: estadoFinal } });
 
     } catch (error) {

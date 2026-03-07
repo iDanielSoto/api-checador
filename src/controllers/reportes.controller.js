@@ -13,31 +13,39 @@ export async function getEstadisticasGlobales(req, res) {
         const paramsIncidencias = [];
 
         if (fecha_inicio && fecha_fin) {
-            whereAsistencias = 'WHERE a.fecha_registro BETWEEN $1 AND $2';
-            whereIncidencias = 'WHERE fecha_inicio BETWEEN $1 AND $2';
+            whereAsistencias = 'WHERE a.fecha_registro BETWEEN $2 AND $3';
+            whereIncidencias = 'WHERE fecha_inicio BETWEEN $2 AND $3';
             paramsAsistencias.push(fecha_inicio, fecha_fin);
             paramsIncidencias.push(fecha_inicio, fecha_fin);
         } else if (fecha_inicio) {
-            whereAsistencias = 'WHERE a.fecha_registro >= $1';
-            whereIncidencias = 'WHERE fecha_inicio >= $1';
+            whereAsistencias = 'WHERE a.fecha_registro >= $2';
+            whereIncidencias = 'WHERE fecha_inicio >= $2';
             paramsAsistencias.push(fecha_inicio);
             paramsIncidencias.push(fecha_inicio);
         } else if (fecha_fin) {
-            whereAsistencias = 'WHERE a.fecha_registro <= $1';
-            whereIncidencias = 'WHERE fecha_inicio <= $1';
+            whereAsistencias = 'WHERE a.fecha_registro <= $2';
+            whereIncidencias = 'WHERE fecha_inicio <= $2';
             paramsAsistencias.push(fecha_fin);
             paramsIncidencias.push(fecha_fin);
         }
 
         const asistencias = await pool.query(`
             SELECT
-                COUNT(*) FILTER (WHERE estado = 'puntual') as puntuales,
-                COUNT(*) FILTER (WHERE estado IN ('retardo','retardo_a','retardo_b')) as retardos,
-                COUNT(*) FILTER (WHERE estado IN ('falta','falta_por_retardo')) as faltas,
-                COUNT(*) FILTER (WHERE estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')) as total
+                COUNT(*) FILTER (WHERE a.estado = 'puntual') as puntuales,
+                COUNT(*) FILTER (WHERE a.estado IN ('retardo','retardo_a','retardo_b')) as retardos,
+                COUNT(*) FILTER (WHERE a.estado IN ('falta','falta_por_retardo')) as faltas,
+                COUNT(*) FILTER (WHERE a.estado IN ('puntual','retardo','retardo_a','retardo_b','falta','falta_por_retardo')) as total
             FROM asistencias a
             WHERE a.empresa_id = $1 ${whereAsistencias ? 'AND ' + whereAsistencias.replace('WHERE ', '') : ''}
         `, [req.empresa_id, ...paramsAsistencias]);
+
+        let stAsis = asistencias.rows[0] || {};
+        stAsis = {
+            puntuales: stAsis.puntuales || 0,
+            retardos: stAsis.retardos || 0,
+            faltas: stAsis.faltas || 0,
+            total: stAsis.total || 0
+        };
 
         const incidencias = await pool.query(`
             SELECT
@@ -51,7 +59,13 @@ export async function getEstadisticasGlobales(req, res) {
             GROUP BY tipo
         `, [req.empresa_id, ...paramsIncidencias]);
 
-        res.json({ success: true, data: { asistencias: asistencias.rows[0], incidencias: incidencias.rows } });
+        res.json({
+            success: true,
+            data: {
+                asistencias: stAsis,
+                incidencias: incidencias.rows
+            }
+        });
 
     } catch (error) {
         console.error(error);
@@ -287,8 +301,8 @@ export async function getReporteDesempeno(req, res) {
         const { empleado_id, departamento_id, fecha_inicio, fecha_fin } = req.query;
 
         let whereEmpleados = '1=1';
-        const params = [];
-        let i = 1;
+        const params = [req.empresa_id];
+        let i = 2; // El $1 es empresa_id
 
         if (empleado_id) {
             whereEmpleados = `e.id = $${i++}`;
@@ -335,11 +349,10 @@ export async function getReporteDesempeno(req, res) {
             FROM empleados e
             INNER JOIN usuarios u ON u.id = e.usuario_id
             LEFT JOIN asistencias a ON a.empleado_id = e.id ${whereFechas}
-            WHERE u.empresa_id = $${i++} AND ${whereEmpleados}
+            WHERE u.empresa_id = $1 AND ${whereEmpleados}
             GROUP BY e.id, u.nombre, e.rfc
             ORDER BY porcentaje_puntualidad DESC NULLS LAST
         `;
-        params.unshift(req.empresa_id);
 
         const result = await pool.query(query, params);
         res.json({ success: true, data: result.rows });
@@ -356,8 +369,8 @@ export async function getComparativaDepartamentos(req, res) {
 
         // Construcción dinámica de filtros de fecha para coincidir con tu estilo
         let whereFechas = '';
-        const params = [];
-        let i = 1;
+        const params = [req.empresa_id];
+        let i = 2; // $1 está reservado para empresa_id
 
         if (fecha_inicio) {
             whereFechas += ` AND a.fecha_registro >= $${i++}`;
@@ -383,7 +396,7 @@ export async function getComparativaDepartamentos(req, res) {
                 ) as eficiencia
             FROM departamentos d
             LEFT JOIN asistencias a ON a.departamento_id = d.id ${whereFechas}
-            WHERE d.es_activo = true
+            WHERE d.es_activo = true AND d.empresa_id = $1
             GROUP BY d.id, d.nombre
             HAVING COUNT(a.id) > 0
             ORDER BY puntuales DESC
