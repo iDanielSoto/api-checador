@@ -2081,3 +2081,27 @@ info: ────────────────────────�
 info: [CRON FALTAS] Programado: todos los días a las 23:53 (America/Mexico_City) {"timestamp":"2026-03-09 13:52:24"}
 info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-09 13:52:24"}
 info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-09 13:52:25"}
+info: 
+───────────────────────────────────────────── {"timestamp":"2026-03-09 13:53:43"}
+info: 🖥️  SERVIDOR CHECADOR {"timestamp":"2026-03-09 13:53:43"}
+info: ───────────────────────────────────────────── {"timestamp":"2026-03-09 13:53:43"}
+info: 📦 development {"timestamp":"2026-03-09 13:53:43"}
+info: 🛠️  http://localhost:3002 {"timestamp":"2026-03-09 13:53:43"}
+info: 🕓 9/3/2026, 1:53:43 p.m. {"timestamp":"2026-03-09 13:53:43"}
+info: ─────────────────────────────────────────────
+ {"timestamp":"2026-03-09 13:53:43"}
+info: [CRON FALTAS] Programado: todos los días a las 23:53 (America/Mexico_City) {"timestamp":"2026-03-09 13:53:43"}
+info: [CRON SALIDAS] Programado: cada 15 minutos (America/Mexico_City) {"timestamp":"2026-03-09 13:53:43"}
+info: ✅ Conectado a la base de datos PostgreSQL {"timestamp":"2026-03-09 13:53:43"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 2:00:00 p.m. {"timestamp":"2026-03-09 14:00:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 2:15:00 p.m. {"timestamp":"2026-03-09 14:15:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 2:30:00 p.m. {"timestamp":"2026-03-09 14:30:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 2:45:00 p.m. {"timestamp":"2026-03-09 14:45:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 3:00:00 p.m. {"timestamp":"2026-03-09 15:00:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 3:15:00 p.m. {"timestamp":"2026-03-09 15:15:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 3:30:00 p.m. {"timestamp":"2026-03-09 15:30:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 5:30:00 p.m. {"timestamp":"2026-03-09 17:30:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 5:45:00 p.m. {"timestamp":"2026-03-09 17:45:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 6:00:00 p.m. {"timestamp":"2026-03-09 18:00:00"}
+info: [CRON SALIDAS] Revisando salidas no cumplidas - 9/3/2026, 6:15:00 p.m. {"timestamp":"2026-03-09 18:15:00"}
+info: [CRON SALIDAS] Empleado Paul Sebastian Torres Navarret no cumplió salida en bloque 540 -1080. Registrando... {"timestamp":"2026-03-09 18:15:00"}
