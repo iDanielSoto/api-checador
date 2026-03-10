@@ -1,6 +1,7 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
+import { extractDescriptorFromImage } from '../services/faceRecognition.service.js';
 
 export async function getCredenciales(req, res) {
     try {
@@ -55,7 +56,6 @@ export async function guardarDactilar(req, res) {
             const id = await generateId(ID_PREFIXES.CREDENCIAL);
             await pool.query('INSERT INTO credenciales (id, empleado_id, dactilar) VALUES ($1, $2, $3)', [id, empleado_id, Buffer.from(dactilar, 'base64')]);
         }
-        // Registrar evento
         await registrarEvento({
             titulo: 'Huella dactilar registrada',
             descripcion: `Se registró/actualizó huella dactilar del empleado ${empleado_id}`,
@@ -65,7 +65,6 @@ export async function guardarDactilar(req, res) {
             usuario_modificador_id: req.usuario?.id,
             detalles: { tipo: 'dactilar' }
         });
-
         res.json({ success: true, message: 'Huella dactilar guardada' });
     } catch (error) {
         console.error('Error en guardarDactilar:', error);
@@ -86,7 +85,6 @@ export async function guardarFacial(req, res) {
             const id = await generateId(ID_PREFIXES.CREDENCIAL);
             await pool.query('INSERT INTO credenciales (id, empleado_id, facial) VALUES ($1, $2, $3)', [id, empleado_id, Buffer.from(facial, 'base64')]);
         }
-        // Registrar evento
         await registrarEvento({
             titulo: 'Datos faciales registrados',
             descripcion: `Se registraron/actualizaron datos faciales del empleado ${empleado_id}`,
@@ -96,7 +94,6 @@ export async function guardarFacial(req, res) {
             usuario_modificador_id: req.usuario?.id,
             detalles: { tipo: 'facial' }
         });
-
         res.json({ success: true, message: 'Datos faciales guardados' });
     } catch (error) {
         console.error('Error en guardarFacial:', error);
@@ -120,7 +117,6 @@ export async function guardarPin(req, res) {
             const id = await generateId(ID_PREFIXES.CREDENCIAL);
             await pool.query('INSERT INTO credenciales (id, empleado_id, pin) VALUES ($1, $2, $3)', [id, empleado_id, pin]);
         }
-        // Registrar evento
         await registrarEvento({
             titulo: 'PIN registrado',
             descripcion: `Se registró/actualizó PIN del empleado ${empleado_id}`,
@@ -130,7 +126,6 @@ export async function guardarPin(req, res) {
             usuario_modificador_id: req.usuario?.id,
             detalles: { tipo: 'pin' }
         });
-
         res.json({ success: true, message: 'PIN guardado' });
     } catch (error) {
         console.error('Error en guardarPin:', error);
@@ -164,7 +159,6 @@ export async function eliminarCredencial(req, res) {
         } else {
             return res.status(400).json({ success: false, message: 'tipo inválido' });
         }
-        // Registrar evento
         await registrarEvento({
             titulo: 'Credencial eliminada',
             descripcion: `Se eliminó credencial (${tipo}) del empleado ${empleadoId}`,
@@ -174,7 +168,6 @@ export async function eliminarCredencial(req, res) {
             usuario_modificador_id: req.usuario?.id,
             detalles: { tipo }
         });
-
         res.json({ success: true, message: 'Credencial eliminada' });
     } catch (error) {
         console.error('Error en eliminarCredencial:', error);
@@ -183,7 +176,7 @@ export async function eliminarCredencial(req, res) {
 }
 
 // ========== ENDPOINTS PÚBLICOS (sin autenticación) ==========
-// Obtener lista de credenciales con huella dactilar
+
 export async function getCredencialesPublico(req, res) {
     try {
         const resultado = await pool.query(`
@@ -201,7 +194,6 @@ export async function getCredencialesPublico(req, res) {
     }
 }
 
-// Obtener huella dactilar de un empleado específico
 export async function getDactilarByEmpleado(req, res) {
     try {
         const { empleadoId } = req.params;
@@ -209,17 +201,11 @@ export async function getDactilarByEmpleado(req, res) {
             'SELECT dactilar FROM credenciales WHERE empleado_id = $1',
             [empleadoId]
         );
-
         if (resultado.rows.length === 0 || !resultado.rows[0].dactilar) {
             return res.status(404).json({ success: false, message: 'Huella no encontrada' });
         }
-
         const dactilarBase64 = resultado.rows[0].dactilar.toString('base64');
-
-        res.json({
-            success: true,
-            data: { dactilar: dactilarBase64 }
-        });
+        res.json({ success: true, data: { dactilar: dactilarBase64 } });
     } catch (error) {
         console.error('Error en getDactilarByEmpleado:', error);
         res.status(500).json({ success: false, message: 'Error al obtener huella' });
@@ -231,24 +217,18 @@ export async function getDactilarByEmpleado(req, res) {
 /**
  * POST /api/credenciales/facial/identify
  * Identificar empleado por descriptor facial (1:N matching)
- * NO requiere autenticación (es método de login)
  */
 export async function identificarPorFacial(req, res) {
     try {
         const { facial } = req.body;
-
         if (!facial) {
-            return res.status(400).json({
-                success: false,
-                message: 'Se requiere el descriptor facial'
-            });
+            return res.status(400).json({ success: false, message: 'Se requiere el descriptor facial' });
         }
 
-        // Obtener todas las credenciales con descriptor facial registrado
         const resultado = await pool.query(`
             SELECT c.id, c.empleado_id, c.facial,
-    e.rfc, e.nss, e.horario_id,
-    u.id as usuario_id, u.nombre, u.correo, u.foto, u.empresa_id
+                e.rfc, e.nss, e.horario_id,
+                u.id as usuario_id, u.nombre, u.correo, u.foto, u.empresa_id
             FROM credenciales c
             INNER JOIN empleados e ON e.id = c.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
@@ -256,46 +236,32 @@ export async function identificarPorFacial(req, res) {
         `);
 
         if (resultado.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'No hay descriptores faciales registrados en el sistema'
-            });
+            return res.status(404).json({ success: false, message: 'No hay descriptores faciales registrados en el sistema' });
         }
 
-        // Convertir el descriptor recibido de Base64 a Float32Array
         const descriptorRecibido = base64ToFloat32Array(facial);
-
         let mejorMatch = null;
         let mejorDistancia = Infinity;
-        const UMBRAL_DISTANCIA = 0.6; // Menor = más estricto
+        const UMBRAL_DISTANCIA = 0.6;
 
-        // Comparar contra cada descriptor registrado
         for (const cred of resultado.rows) {
             try {
-                // Convertir BYTEA a Float32Array
                 const descriptorRegistrado = byteaToFloat32Array(cred.facial);
-
-                // Calcular distancia euclidiana
                 const distancia = calcularDistanciaEuclidiana(descriptorRecibido, descriptorRegistrado);
-
-                console.log(`Comparando con empleado ${cred.empleado_id}: distancia = ${distancia.toFixed(4)} `);
-
+                console.log(`Comparando con empleado ${cred.empleado_id}: distancia = ${distancia.toFixed(4)}`);
                 if (distancia < mejorDistancia) {
                     mejorDistancia = distancia;
                     mejorMatch = cred;
                 }
             } catch (err) {
-                console.error(`Error procesando credencial ${cred.id}: `, err.message);
+                console.error(`Error procesando credencial ${cred.id}:`, err.message);
             }
         }
 
-        // Verificar si el mejor match está dentro del umbral
         if (mejorMatch && mejorDistancia < UMBRAL_DISTANCIA) {
             const matchScore = Math.round((1 - mejorDistancia) * 100);
+            console.log(`✅ Match facial encontrado: empleado ${mejorMatch.empleado_id}, score: ${matchScore}%`);
 
-            console.log(`✅ Match facial encontrado: empleado ${mejorMatch.empleado_id}, score: ${matchScore}% `);
-
-            // Registrar evento
             await registrarEvento({
                 titulo: 'Identificación facial exitosa',
                 descripcion: `${mejorMatch.nombre} identificado por reconocimiento facial`,
@@ -324,20 +290,69 @@ export async function identificarPorFacial(req, res) {
             });
         }
 
-        // No se encontró match
-        console.log(`❌ Sin match facial.Mejor distancia: ${mejorDistancia.toFixed(4)}, umbral: ${UMBRAL_DISTANCIA} `);
-
-        return res.status(404).json({
-            success: false,
-            message: 'Rostro no reconocido en el sistema'
-        });
+        console.log(`❌ Sin match facial. Mejor distancia: ${mejorDistancia.toFixed(4)}, umbral: ${UMBRAL_DISTANCIA}`);
+        return res.status(404).json({ success: false, message: 'Rostro no reconocido en el sistema' });
 
     } catch (error) {
         console.error('❌ Error en identificarPorFacial:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error interno del servidor'
-        });
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
+    }
+}
+
+/**
+ * POST /api/credenciales/facial/verify-image
+ * Valida imagen Base64 del móvil contra el descriptor guardado en DB.
+ * Usa face-api.js en el servidor para extraer el descriptor.
+ */
+export async function verificarFacialPorImagen(req, res) {
+    try {
+        const { empleado_id, imagen_base64 } = req.body;
+
+        if (!empleado_id || !imagen_base64) {
+            return res.status(400).json({ success: false, message: 'Se requiere el empleado_id y la imagen_base64' });
+        }
+
+        // 1. Obtener descriptor guardado desde la DB
+        const resultado = await pool.query(
+            'SELECT facial FROM credenciales WHERE empleado_id = $1',
+            [empleado_id]
+        );
+
+        if (resultado.rows.length === 0 || !resultado.rows[0].facial) {
+            return res.status(404).json({ success: false, message: 'El empleado no tiene un rostro registrado en la base de datos' });
+        }
+
+        const descriptorRegistrado = byteaToFloat32Array(resultado.rows[0].facial);
+
+        // 2. Extraer descriptor de la imagen recibida
+        const base64Data = imagen_base64.replace(/^data:image\/\w+;base64,/, '');
+        const imageBuffer = Buffer.from(base64Data, 'base64');
+
+        console.log(`🔍 Extrayendo características faciales de imagen para empleado ${empleado_id}...`);
+        const descriptorRecibido = await extractDescriptorFromImage(imageBuffer);
+
+        if (!descriptorRecibido) {
+            return res.status(400).json({ success: false, message: 'No se detectó ningún rostro válido en la imagen proporcionada' });
+        }
+
+        // 3. Comparar descriptores
+        const UMBRAL_DISTANCIA = 0.6;
+        const distancia = calcularDistanciaEuclidiana(descriptorRecibido, descriptorRegistrado);
+
+        console.log(`📊 Distancia facial para empleado ${empleado_id}: ${distancia.toFixed(4)} (Umbral: ${UMBRAL_DISTANCIA})`);
+
+        if (distancia < UMBRAL_DISTANCIA) {
+            const matchScore = Math.round((1 - (distancia / 1.5)) * 100);
+            console.log(`✅ Match facial exitoso.`);
+            return res.json({ success: true, message: 'Rostro verificado exitosamente', data: { matchScore, distancia } });
+        }
+
+        console.log(`❌ Match facial fallido.`);
+        return res.status(400).json({ success: false, message: 'El rostro de la imagen no coincide con el registrado en el sistema' });
+
+    } catch (error) {
+        console.error('❌ Error en verificarFacialPorImagen:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor procesando la imagen' });
     }
 }
 
@@ -360,7 +375,7 @@ function byteaToFloat32Array(bytea) {
 
 function calcularDistanciaEuclidiana(desc1, desc2) {
     if (desc1.length !== desc2.length) {
-        throw new Error(`Descriptores de diferente longitud: ${desc1.length} vs ${desc2.length} `);
+        throw new Error(`Descriptores de diferente longitud: ${desc1.length} vs ${desc2.length}`);
     }
     let suma = 0;
     for (let i = 0; i < desc1.length; i++) {
@@ -373,57 +388,38 @@ function calcularDistanciaEuclidiana(desc1, desc2) {
 /**
  * POST /api/credenciales/pin/login
  * Login de empleado mediante PIN (PÚBLICO)
- * Retorna datos del empleado si el PIN es correcto
  */
 export async function loginPorPin(req, res) {
     try {
         const { usuario, pin } = req.body;
         if (!usuario || !pin) {
-            return res.status(400).json({
-                success: false,
-                message: 'Usuario y PIN son requeridos'
-            });
+            return res.status(400).json({ success: false, message: 'Usuario y PIN son requeridos' });
         }
-        // Obtener credenciales y datos del empleado buscando por usuario o correo
+
         const resultado = await pool.query(`
             SELECT 
                 c.pin, 
-                e.id as empleado_id, 
-                e.rfc, 
-                e.nss, 
-                e.horario_id,
-                u.id as usuario_id, 
-                u.nombre, 
-                u.correo, 
-                u.usuario,
-                u.telefono,
-                u.foto,
-                u.es_empleado,
-                u.empresa_id
+                e.id as empleado_id, e.rfc, e.nss, e.horario_id,
+                u.id as usuario_id, u.nombre, u.correo, u.usuario,
+                u.telefono, u.foto, u.es_empleado, u.empresa_id
             FROM credenciales c
             INNER JOIN empleados e ON e.id = c.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
             WHERE (u.usuario = $1 OR u.correo = $1)
         `, [usuario]);
+
         if (resultado.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Usuario no encontrado o sin credenciales configuradas'
-            });
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado o sin credenciales configuradas' });
         }
+
         const datos = resultado.rows[0];
-        // Verificar PIN
-        // NOTA: El PIN en base de datos puede ser numérico o string.
-        // Convertimos ambos a string para comparación segura.
         const pinRegistrado = String(datos.pin).trim();
         const pinIngresado = String(pin).trim();
+
         if (pinRegistrado !== pinIngresado) {
-            return res.status(401).json({
-                success: false,
-                message: 'PIN incorrecto'
-            });
+            return res.status(401).json({ success: false, message: 'PIN incorrecto' });
         }
-        // Registrar evento de autenticación
+
         await registrarEvento({
             titulo: 'Login por PIN exitoso',
             descripcion: `${datos.nombre} inició sesión mediante PIN`,
@@ -432,12 +428,11 @@ export async function loginPorPin(req, res) {
             empleado_id: datos.empleado_id,
             detalles: { metodo: 'pin', usuario: datos.usuario, empresa_id: datos.empresa_id }
         });
-        // Retornar datos del empleado y usuario estructurados
+
         res.json({
             success: true,
             message: 'Login correcto',
             data: {
-                // Estructura compatible con lo que espera el frontend
                 usuario: {
                     id: datos.usuario_id,
                     usuario: datos.usuario,
@@ -445,7 +440,7 @@ export async function loginPorPin(req, res) {
                     nombre: datos.nombre,
                     foto: datos.foto,
                     telefono: datos.telefono,
-                    es_empleado: true, // Si tiene credenciales, es empleado
+                    es_empleado: true,
                     empleado_id: datos.empleado_id
                 },
                 empleado: {
@@ -456,14 +451,11 @@ export async function loginPorPin(req, res) {
                     nss: datos.nss,
                     horario_id: datos.horario_id
                 },
-                token: datos.usuario_id // Token simple por ahora, igual que en auth.controller
+                token: datos.usuario_id
             }
         });
     } catch (error) {
         console.error('Error en loginPorPin:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al iniciar sesión con PIN'
-        });
+        res.status(500).json({ success: false, message: 'Error al iniciar sesión con PIN' });
     }
 }

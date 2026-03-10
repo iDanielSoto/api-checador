@@ -24,9 +24,20 @@ export async function getConfiguracion(req, res) {
             });
         }
 
+        const configData = resultado.rows[0];
+
+        // Asegurar que orden_credenciales tiene un valor predeterminado si es null
+        if (!configData.orden_credenciales) {
+            configData.orden_credenciales = {
+                pin: { activo: true, prioridad: 1 },
+                dactilar: { activo: true, prioridad: 2 },
+                facial: { activo: true, prioridad: 3 }
+            };
+        }
+
         res.json({
             success: true,
-            data: resultado.rows[0]
+            data: configData
         });
 
     } catch (error) {
@@ -57,9 +68,20 @@ export async function getConfiguracionById(req, res) {
             });
         }
 
+        const configData = resultado.rows[0];
+
+        // Asegurar que orden_credenciales tiene un valor predeterminado si es null
+        if (!configData.orden_credenciales) {
+            configData.orden_credenciales = {
+                pin: { activo: true, prioridad: 1 },
+                dactilar: { activo: true, prioridad: 2 },
+                facial: { activo: true, prioridad: 3 }
+            };
+        }
+
         res.json({
             success: true,
-            data: resultado.rows[0]
+            data: configData
         });
 
     } catch (error) {

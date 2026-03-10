@@ -777,21 +777,32 @@ export async function streamSolicitudes(req, res) {
         return;
     }
 
-    // Verificar que el token (usuario_id) sea válido
     try {
+        // Decodificar JWT para obtener el userId real
+        let userId = token;
+        try {
+            const { default: jwt } = await import('jsonwebtoken');
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret');
+            userId = decoded.sub;
+        } catch {
+            // No es JWT válido, tratar como userId directo (legacy)
+            userId = token;
+        }
+
         const resultado = await pool.query(
             "SELECT id FROM usuarios WHERE id = $1 AND estado_cuenta = 'activo'",
-            [token]
+            [userId]
         );
 
         if (resultado.rows.length === 0) {
             return res.status(401).json({ success: false, message: 'Token inválido' });
         }
+
+        addClient(res);
     } catch (error) {
+        console.error('Error en SSE solicitudes stream:', error);
         return res.status(500).json({ success: false, message: 'Error de autenticación' });
     }
-
-    addClient(res);
 }
 
 /**

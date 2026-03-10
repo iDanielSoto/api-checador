@@ -150,7 +150,7 @@ export async function createAviso(req, res) {
             // Resolver IDs de empleados (pueden venir como USU... o EMP...)
             const empleadosIds = [];
             for (const empId of empleados) {
-                if (empId.startsWith('USU')) {
+                if (empId.includes('-USU-') || empId.startsWith('USU')) {
                     const resEmp = await client.query('SELECT id FROM empleados WHERE usuario_id = $1', [empId]);
                     if (resEmp.rows.length > 0) {
                         empleadosIds.push(resEmp.rows[0].id);
@@ -246,7 +246,7 @@ export async function updateAviso(req, res) {
             // Resolver IDs de empleados (pueden venir como USU... o EMP...)
             const empleadosIds = [];
             for (const empId of empleados) {
-                if (empId.startsWith('USU')) {
+                if (empId.includes('-USU-') || empId.startsWith('USU')) {
                     const resEmp = await client.query('SELECT id FROM empleados WHERE usuario_id = $1', [empId]);
                     if (resEmp.rows.length > 0) {
                         empleadosIds.push(resEmp.rows[0].id);

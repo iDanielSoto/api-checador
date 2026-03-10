@@ -199,7 +199,7 @@ export function srvVerificarLongitudYTipo(registrosHoy, bloque, fechaISO, interv
  * 8. EVALUAR ESTADO BASADO EN REGLAS (Puntual, Retardo, Temprano)
  */
 export function srvEvaluarEstado(tipoAsistencia, horaMinutos, bloque, tolerancia) {
-    if (!bloque) return (tipoAsistencia === 'entrada') ? 'puntual' : 'salida_puntual';
+    if (!bloque) return (tipoAsistencia === 'entrada') ? 'falta' : 'salida_fuera_horario';
 
     const dias = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
     const diaHoy = dias[new Date().getDay()];

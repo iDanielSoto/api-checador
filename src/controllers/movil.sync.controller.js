@@ -1,6 +1,12 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
 import { ejecutarValidacionesRed } from '../utils/networkValidator.js';
+import {
+    srvBuscarConfiguracion,
+    srvObtenerTurnosDeHoy,
+    srvBuscarBloqueActual,
+    srvEvaluarEstado
+} from '../services/asistencias.service.js';
 
 /**
  * GET /api/movil/sync/mis-datos
@@ -109,8 +115,6 @@ export const getMisDatos = async (req, res) => {
         // ========== DEPARTAMENTOS ==========
         let departamentos = [];
         try {
-            // FIX: incluir latitud, longitud y radio que el cliente SQLite necesita
-            // para geolocalización al registrar asistencia
             const deptoResult = await pool.query(`
                 SELECT
                     ed.empleado_id,
@@ -152,9 +156,9 @@ export const getMisDatos = async (req, res) => {
 
 /**
  * POST /api/movil/sync/asistencias
- * 
+ *
  * Recibe asistencias pendientes del dispositivo móvil.
- * Mismo formato que el endpoint de escritorio.
+ * Re-evalúa el estado (puntual/retardo/etc) con la lógica real del servidor.
  */
 export const sincronizarAsistencias = async (req, res) => {
     try {
@@ -197,12 +201,6 @@ export const sincronizarAsistencias = async (req, res) => {
                     continue;
                 }
 
-                // Verificar duplicado por ID si el móvil envía un ID (idempotency) o generar uno nuevo
-                // Asumiremos que si ya existe un ID en BDD igual al local, ya se sincronizó.
-                // PERO el ID local puede ser UUID generado por movil o integer serial.
-                // Si el ID es texto y usamos UUIDs, podríamos chequearlo. 
-                // Mejor estrategia: Chequear duplicado por fecha/empleado/tipo como en escritorio.sync
-
                 const fecha = reg.fecha_registro
                     ? new Date(reg.fecha_registro)
                     : new Date();
@@ -211,7 +209,7 @@ export const sincronizarAsistencias = async (req, res) => {
                 const dosMinsDespues = new Date(fecha.getTime() + (2 * 60 * 1000));
 
                 const dupCheck = await pool.query(`
-                  SELECT id
+                  SELECT id, estado
                   FROM asistencias
                   WHERE empleado_id = $1
                     AND tipo = $2
@@ -222,9 +220,51 @@ export const sincronizarAsistencias = async (req, res) => {
                 if (dupCheck.rows.length > 0) {
                     sincronizados.push({
                         id_local: reg.id,
-                        id_servidor: dupCheck.rows[0].id
+                        id_servidor: dupCheck.rows[0].id,
+                        estado: dupCheck.rows[0].estado,
+                        tipo: reg.tipo
                     });
                     continue;
+                }
+
+                // --- Re-evaluación del estado y captura del snapshot horario ---
+                let estadoCalculado = reg.estado || reg.clasificacion || 'pendiente';
+                let horarioSnapshot = null;
+
+                try {
+                    const empQuery = await pool.query(
+                        'SELECT u.empresa_id FROM empleados e JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1',
+                        [reg.empleado_id]
+                    );
+                    if (empQuery.rows.length > 0) {
+                        const empresaId = empQuery.rows[0].empresa_id;
+                        const { tolerancia, horario } = await srvBuscarConfiguracion(reg.empleado_id, empresaId);
+
+                        const fechaSync = new Date(fecha);
+                        const minsHora = fechaSync.getHours() * 60 + fechaSync.getMinutes();
+                        const turnosDiaSync = srvObtenerTurnosDeHoy(horario, fechaSync);
+                        const bloqueSync = srvBuscarBloqueActual(
+                            turnosDiaSync,
+                            minsHora,
+                            tolerancia.intervalo_bloques_minutos,
+                            tolerancia.minutos_anticipado_max,
+                            tolerancia.minutos_posterior_salida
+                        );
+
+                        estadoCalculado = srvEvaluarEstado(reg.tipo, minsHora, bloqueSync, tolerancia);
+
+                        // Guardar snapshot del bloque vigente al momento del checado
+                        if (bloqueSync) {
+                            const minsToHHMM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+                            horarioSnapshot = JSON.stringify({
+                                inicio: minsToHHMM(bloqueSync.entrada),
+                                fin: minsToHHMM(bloqueSync.salida),
+                                turno_index: bloqueSync.index ?? null
+                            });
+                        }
+                    }
+                } catch (calcError) {
+                    console.warn(`[movilSync] No se pudo recalcular estado de ${reg.empleado_id}. Usando original. Detalle:`, calcError.message);
                 }
 
                 // Generar ID
@@ -233,7 +273,6 @@ export const sincronizarAsistencias = async (req, res) => {
                 // --- Validar segmentos de red para esta asistencia ---
                 let alertasReg = [];
                 try {
-                    // Obtener empresa del empleado y sus segmentos de red
                     const empEmpresa = await pool.query(`
                         SELECT e.id as empresa_id, c.segmentos_red
                         FROM empleados emp
@@ -246,7 +285,6 @@ export const sincronizarAsistencias = async (req, res) => {
                     if (empEmpresa.rows.length > 0) {
                         const segmentosRed = empEmpresa.rows[0].segmentos_red || [];
 
-                        // Extraer coordenadas GPS si el móvil las envió
                         let coordenadas = null;
                         if (reg.ubicacion && Array.isArray(reg.ubicacion) && reg.ubicacion.length >= 2) {
                             coordenadas = { lat: reg.ubicacion[0], lng: reg.ubicacion[1] };
@@ -254,44 +292,69 @@ export const sincronizarAsistencias = async (req, res) => {
                             coordenadas = { lat: reg.lat, lng: reg.lng };
                         }
 
+                        let ubicacionDepartamento = null;
+                        if (reg.departamento_id) {
+                            const deptoQuery = await pool.query(
+                                'SELECT latitud, longitud, radio_metros FROM departamentos WHERE id = $1',
+                                [reg.departamento_id]
+                            );
+                            if (deptoQuery.rows.length > 0 && deptoQuery.rows[0].latitud) {
+                                ubicacionDepartamento = deptoQuery.rows[0];
+                            }
+                        }
+
                         const validacion = ejecutarValidacionesRed({
                             ip: reg.ip || null,
                             segmentosRed,
                             coordenadas,
-                            wifi: reg.wifi || null,  // { bssid, ssid } si el móvil lo envía
+                            ubicacionDepartamento,
+                            wifi: reg.wifi || null,
                         });
 
                         alertasReg = validacion.alertas;
 
                         if (alertasReg.length > 0) {
-                            console.warn(`⚠️ [movilSync] Alertas de red para ${reg.empleado_id}:`, alertasReg.map(a => a.tipo).join(', '));
+                            console.warn(`⚠️ [movilSync] Alertas de red/gps para ${reg.empleado_id}:`, alertasReg.map(a => a.tipo).join(', '));
                         }
                     }
                 } catch (netErr) {
-                    console.error('[movilSync] Error al validar red (no crítico):', netErr.message);
+                    console.error('[movilSync] Error al validar red/gps:', netErr.message);
                 }
 
-                // Insertar registro con alertas de red
+                // RECHAZO ESTRICTO DE PERÍMETRO
+                if (alertasReg.length > 0) {
+                    rechazados.push({
+                        id_local: reg.id,
+                        error: `Validación rechazada: ${alertasReg.map(a => a.mensaje).join(' | ')}`,
+                        codigo: 'PERIMETRO_INVALIDO'
+                    });
+                    continue;
+                }
+
+                // Insertar registro con estado real y snapshot del horario
                 await pool.query(`
                     INSERT INTO asistencias
                     (id, empleado_id, tipo, estado, departamento_id,
-                     dispositivo_origen, fecha_registro, ubicacion, alertas)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                     dispositivo_origen, fecha_registro, ubicacion, alertas, horario_snapshot)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 `, [
                     servidor_id,
                     reg.empleado_id,
                     reg.tipo,
-                    reg.estado || reg.clasificacion || 'pendiente',
+                    estadoCalculado,
                     reg.departamento_id || null,
                     reg.dispositivo_origen || 'movil',
                     fecha,
                     reg.ubicacion || null,
-                    JSON.stringify(alertasReg)
+                    JSON.stringify(alertasReg),
+                    horarioSnapshot
                 ]);
 
                 sincronizados.push({
                     id_local: reg.id,
-                    id_servidor: servidor_id
+                    id_servidor: servidor_id,
+                    estado: estadoCalculado,
+                    tipo: reg.tipo
                 });
 
             } catch (regError) {
@@ -322,9 +385,8 @@ export const sincronizarAsistencias = async (req, res) => {
 
 /**
  * POST /api/movil/sync/sesiones
- * 
+ *
  * Recibe eventos de sesión offline (login/logout) del móvil.
- * Los guarda en la tabla sesiones_movil para auditoría del admin.
  */
 export const sincronizarSesiones = async (req, res) => {
     try {
@@ -337,11 +399,6 @@ export const sincronizarSesiones = async (req, res) => {
             });
         }
 
-        // Crear tabla si no existe (auto-migración)
-        // SIN foreign keys para evitar violaciones con IDs de sesiones offline
-        // FIX: usar IF NOT EXISTS y evitar recrear en cada request
-        // FIX: usuario_id y empleado_id como TEXT para coincidir con IDs alfanuméricos
-        // del generador de IDs del sistema (ID_PREFIXES genera strings, no integers)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS sesiones_movil (
                 id SERIAL PRIMARY KEY,
@@ -365,7 +422,6 @@ export const sincronizarSesiones = async (req, res) => {
             `);
             if (parseInt(fkCheck.rows[0].fk_count) > 0) {
                 console.log('🔧 [movilSync] Migrando sesiones_movil: eliminando foreign keys...');
-                // Guardar datos existentes
                 const backup = await pool.query('SELECT * FROM sesiones_movil');
                 await pool.query('DROP TABLE sesiones_movil');
                 await pool.query(`
@@ -380,7 +436,6 @@ export const sincronizarSesiones = async (req, res) => {
                         recibido_at TIMESTAMP DEFAULT NOW()
                     )
                 `);
-                // Restaurar datos
                 for (const row of backup.rows) {
                     await pool.query(
                         `INSERT INTO sesiones_movil (usuario_id, empleado_id, tipo, modo, fecha_evento, dispositivo, recibido_at)
@@ -404,8 +459,6 @@ export const sincronizarSesiones = async (req, res) => {
                     continue;
                 }
 
-                // FIX: verificar que el usuario existe antes de insertar
-                // para no fallar silenciosamente por FK
                 const usuarioExiste = await pool.query(
                     'SELECT id FROM usuarios WHERE id = $1',
                     [s.usuario_id]
@@ -455,11 +508,10 @@ export const sincronizarSesiones = async (req, res) => {
 };
 
 /**
-     * GET /api/movil/sync/dispositivos/:empleadoId
-     * 
-     * Verificación pública de dispositivos por empleado.
-     * Devuelve la lista de dispositivos activos asociados al empleado.
-     */
+ * GET /api/movil/sync/dispositivos/:empleadoId
+ *
+ * Verificación pública de dispositivos por empleado.
+ */
 export const verificarDispositivosEmpleado = async (req, res) => {
     try {
         const { empleadoId } = req.params;

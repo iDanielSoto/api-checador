@@ -117,7 +117,8 @@ export async function createBiometrico(req, res) {
             tipo,        // 'facial' o 'dactilar'
             puerto,
             ip,
-            escritorio_id
+            escritorio_id,
+            device_id    // identificador real del hardware
         } = req.body;
 
         if (!nombre || !tipo) {
@@ -130,10 +131,10 @@ export async function createBiometrico(req, res) {
         const id = await generateId(ID_PREFIXES.BIOMETRICO);
 
         const resultado = await pool.query(`
-            INSERT INTO biometrico (id, nombre, descripcion, tipo, puerto, ip, estado, es_activo, escritorio_id)
-            VALUES ($1, $2, $3, $4, $5, $6, 'desconectado', true, $7)
+            INSERT INTO biometrico (id, nombre, descripcion, tipo, puerto, ip, estado, es_activo, escritorio_id, device_id)
+            VALUES ($1, $2, $3, $4, $5, $6, 'desconectado', true, $7, $8)
             RETURNING *
-        `, [id, nombre, descripcion, tipo, puerto, ip, escritorio_id]);
+        `, [id, nombre, descripcion, tipo, puerto, ip, escritorio_id, device_id]);
 
         // Registrar evento
         await registrarEvento({
@@ -175,7 +176,8 @@ export async function updateBiometrico(req, res) {
             ip,
             estado,
             es_activo,
-            escritorio_id
+            escritorio_id,
+            device_id
         } = req.body;
 
         const resultado = await pool.query(`
@@ -187,10 +189,11 @@ export async function updateBiometrico(req, res) {
                 ip = COALESCE($5, ip),
                 estado = COALESCE($6, estado),
                 es_activo = COALESCE($7, es_activo),
-                escritorio_id = COALESCE($8, escritorio_id)
-            WHERE id = $9
+                escritorio_id = COALESCE($8, escritorio_id),
+                device_id = COALESCE($9, device_id)
+            WHERE id = $10
             RETURNING *
-        `, [nombre, descripcion, tipo, puerto, ip, estado, es_activo, escritorio_id, id]);
+        `, [nombre, descripcion, tipo, puerto, ip, estado, es_activo, escritorio_id, device_id, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

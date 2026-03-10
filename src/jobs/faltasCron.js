@@ -13,7 +13,7 @@ import { requestContext } from '../utils/context.js';
 export function iniciarCronFaltas() {
     // Min Hour DayMonth Month DayWeek
     // 00  00   *        *     1-5 (lunes a viernes)
-    cron.schedule('08 23 * * *', async () => {
+    cron.schedule('53 23 * * *', async () => {
         logger.info(`[CRON FALTAS] Iniciando revisión de faltas - ${new Date().toLocaleString()}`);
         try {
             await registrarFaltasDelDia();
@@ -24,13 +24,21 @@ export function iniciarCronFaltas() {
         timezone: 'America/Mexico_City'
     });
 
-    logger.info('[CRON FALTAS] Programado: todos los días a las 23:08 (America/Mexico_City)');
+    logger.info('[CRON FALTAS] Programado: todos los días a las 23:53 (America/Mexico_City)');
 }
 
 async function registrarFaltasDelDia() {
+    // 0. Obtener Fecha Local (America/Mexico_City) para evitar que UTC nos cambie el día
+    const dateMxStr = new Date().toLocaleString("en-US", { timeZone: "America/Mexico_City" });
+    const hoy = new Date(dateMxStr);
+
     const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-    const hoy = new Date();
     const diaHoy = diasSemana[hoy.getDay()];
+
+    const yyyy = hoy.getFullYear();
+    const mm = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dd = String(hoy.getDate()).padStart(2, '0');
+    const fechaLocalSql = `${yyyy}-${mm}-${dd}`;
 
     // Obtener todos los empleados activos con horario asignado
     const empleados = await pool.query(`
@@ -48,11 +56,11 @@ async function registrarFaltasDelDia() {
         return;
     }
 
-    // 1. Obtener todas las asistencias del día en una sola consulta
+    // 1. Obtener todas las asistencias del día (Fijado a nuestra fecha local en MX)
     const asistenciasHoyResult = await pool.query(`
         SELECT empleado_id FROM asistencias
-        WHERE DATE(fecha_registro) = CURRENT_DATE
-    `);
+        WHERE DATE(fecha_registro) = $1
+    `, [fechaLocalSql]);
     const empleadosConAsistencia = new Set(asistenciasHoyResult.rows.map(a => a.empleado_id));
 
     // 2. Obtener departamentos de todos los empleados
@@ -89,9 +97,11 @@ async function registrarFaltasDelDia() {
             const departamentoId = deptosMap.get(emp.empleado_id) || null;
 
             // Calcular fecha de registro basada en la hora de entrada del turno
+            // Calcular fecha de registro local exacta para el infractor en un formato directo SQL TimeStamp
             const [hora, minuto] = turnoHoy.entrada.split(':');
-            const fechaRegistro = new Date();
-            fechaRegistro.setHours(parseInt(hora), parseInt(minuto), 0, 0);
+
+            // Construimos cadena clásica de SQL (sin sufijo Tz) para evitar que Postgres mueva turnos nocturnos a UTC
+            const fechaRegistroSql = `${fechaLocalSql} ${hora.padStart(2, '0')}:${minuto.padStart(2, '0')}:00`;
 
             await requestContext.run(new Map([['empresa_prefijo', emp.empresa_prefijo]]), async () => {
                 // Registrar falta con la fecha calculada
@@ -99,7 +109,7 @@ async function registrarFaltasDelDia() {
                 await pool.query(`
                     INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, fecha_registro, empresa_id)
                     VALUES($1, 'falta', 'escritorio', $2, $3, $4, $5)
-                `, [id, emp.empleado_id, departamentoId, fechaRegistro.toISOString(), emp.empresa_id]);
+                `, [id, emp.empleado_id, departamentoId, fechaRegistroSql, emp.empresa_id]);
 
                 // Registrar evento
                 const eventoId = await generateId(ID_PREFIXES.EVENTO);
@@ -122,7 +132,7 @@ async function registrarFaltasDelDia() {
                         horario_turno: turnoHoy,
                         empresa_id: emp.empresa_id
                     }),
-                    fechaRegistro.toISOString()
+                    fechaRegistroSql
                 ]);
             });
 

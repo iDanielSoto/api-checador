@@ -1,4 +1,0 @@
-2026-03-05 23:43:58 [32minfo[39m: ✅ Conectado a la base de datos PostgreSQL
---- TODAS LAS COLUMNAS VARCHAR(8) EN LA BD ---
---- TRIGGERS EN LA TABLA AVISOS ---
---- TERMINADO ---

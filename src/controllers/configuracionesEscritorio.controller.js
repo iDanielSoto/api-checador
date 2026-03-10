@@ -27,10 +27,11 @@ export async function getConfiguracionEscritorio(req, res) {
                     id, configuracion_id, escritorio_id, sincronizacion_automatica, 
                     frecuencia_sincronizacion_min, modo_offline_permitido,
                     iniciar_con_windows, forzar_pantalla_completa, bloquear_cierre_app,
-                    pin_administrador, metodos_autenticacion
+                    pin_administrador, metodos_autenticacion, prioridad_biometrico
                 ) VALUES (
                     $1, $2, $3, true, 15, true, false, false, false, '', 
-                    '{"huella": true, "rostro": true, "codigo": true}'::jsonb
+                    '{"huella": true, "rostro": true, "codigo": true}'::jsonb,
+                    '[{"metodo":"huella","activo":true,"nivel":1},{"metodo":"rostro","activo":true,"nivel":2},{"metodo":"codigo","activo":true,"nivel":3}]'::jsonb
                 ) RETURNING *
             `, [newId, configId, escritorio_id]);
         }
@@ -61,10 +62,12 @@ export async function updateConfiguracionEscritorio(req, res) {
             bloquear_cierre_app,
             pin_administrador,
             metodos_autenticacion,
+            prioridad_biometrico,
             es_activo
         } = req.body;
 
         const metodosJson = metodos_autenticacion ? JSON.stringify(metodos_autenticacion) : null;
+        const prioridadJson = prioridad_biometrico ? JSON.stringify(prioridad_biometrico) : null;
 
         const result = await pool.query(`
             UPDATE configuraciones_escritorio SET
@@ -77,13 +80,14 @@ export async function updateConfiguracionEscritorio(req, res) {
                 pin_administrador = COALESCE($7, pin_administrador),
                 metodos_autenticacion = COALESCE($8, metodos_autenticacion),
                 es_activo = COALESCE($9, es_activo),
+                prioridad_biometrico = COALESCE($11, prioridad_biometrico),
                 actualizado_en = CURRENT_TIMESTAMP
             WHERE escritorio_id = $10
             RETURNING *
         `, [
             sincronizacion_automatica, frecuencia_sincronizacion_min, modo_offline_permitido,
             iniciar_con_windows, forzar_pantalla_completa, bloquear_cierre_app,
-            pin_administrador, metodosJson, es_activo, escritorio_id
+            pin_administrador, metodosJson, es_activo, escritorio_id, prioridadJson
         ]);
 
         if (result.rows.length === 0) {

@@ -23,9 +23,16 @@ export function iniciarCronSalidasNoCumplidas() {
 
 async function revisarSalidasNoCumplidas() {
     const ahora = new Date();
-    const minsHoraActual = ahora.getHours() * 60 + ahora.getMinutes();
+    const dateMxStr = ahora.toLocaleString("en-US", { timeZone: "America/Mexico_City" });
+    const hoy = new Date(dateMxStr);
+    const minsHoraActual = hoy.getHours() * 60 + hoy.getMinutes();
     const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-    const diaHoy = diasSemana[ahora.getDay()];
+    const diaHoy = diasSemana[hoy.getDay()];
+
+    const yyyy = hoy.getFullYear();
+    const mm = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dd = String(hoy.getDate()).padStart(2, '0');
+    const fechaLocalSql = `${yyyy}-${mm}-${dd}`;
 
     // 1. Obtener empleados activos cuyo horario obligue a salida y tengan tolerancias
     const query = await pool.query(`
@@ -82,8 +89,8 @@ async function revisarSalidasNoCumplidas() {
                     const regs = await pool.query(`
                         SELECT * FROM asistencias 
                         WHERE empleado_id = $1 
-                        AND DATE(fecha_registro) = CURRENT_DATE
-                    `, [emp.empleado_id]);
+                        AND DATE(fecha_registro) = $2
+                    `, [emp.empleado_id, fechaLocalSql]);
 
                     const regsBloque = regs.rows.filter(r => {
                         const d = new Date(r.fecha_registro);
@@ -95,35 +102,36 @@ async function revisarSalidasNoCumplidas() {
                     const tieneSalida = regsBloque.some(r => r.tipo === 'salida' || (r.tipo === 'sistema' && r.estado === 'salida_no_cumplida'));
 
                     if (tieneEntrada && !tieneSalida) {
-                        logger.info(`[CRON SALIDAS] Empleado ${emp.nombre} no cumplió salida en bloque ${bloque.entrada}-${bloque.salida}. Registrando...`);
+                        logger.info(`[CRON SALIDAS] Empleado ${emp.nombre} no cumplió salida en bloque ${bloque.entrada} -${bloque.salida}. Registrando...`);
 
                         const id = await generateId(ID_PREFIXES.ASISTENCIA);
                         // Obtener depto
                         const deptoRes = await pool.query(`SELECT departamento_id FROM empleados_departamentos WHERE empleado_id = $1 AND es_activo = true LIMIT 1`, [emp.empleado_id]);
                         const deptoId = deptoRes.rows[0]?.departamento_id || null;
 
-                        // Calcular la fecha exacta de salida esperada (fin de turno del bloque)
-                        const fechaExpectedSalida = new Date(ahora);
-                        fechaExpectedSalida.setHours(Math.floor(bloque.salida / 60), bloque.salida % 60, 0, 0);
+                        // Calcular la fecha exacta de salida esperada purificada para inyección directa de PostgreSQL
+                        const horaSql = String(Math.floor(bloque.salida / 60)).padStart(2, '0');
+                        const minSql = String(bloque.salida % 60).padStart(2, '0');
+                        const fechaExpectedSql = `${fechaLocalSql} ${horaSql}:${minSql}:00`;
 
                         // Registrar salida no cumplida con su hora original exacta
                         await pool.query(`
-                            INSERT INTO asistencias (id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro)
-                            VALUES ($1, 'salida_no_cumplida', 'sistema', $2, $3, 'salida', $4, $5)
-                        `, [id, emp.empleado_id, deptoId, emp.empresa_id, fechaExpectedSalida]);
+                            INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro)
+                    VALUES($1, 'salida_no_cumplida', 'sistema', $2, $3, 'salida', $4, $5)
+                        `, [id, emp.empleado_id, deptoId, emp.empresa_id, fechaExpectedSql]);
 
                         // Evento
                         const eventoId = await generateId(ID_PREFIXES.EVENTO);
                         await pool.query(`
-                            INSERT INTO eventos (id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, empresa_id)
-                            VALUES ($1, $2, $3, 'asistencia', 'media', $4, $5, $6)
+                            INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, empresa_id)
+                    VALUES($1, $2, $3, 'asistencia', 'media', $4, $5, $6)
                         `, [eventoId, 'Salida no registrada', `${emp.nombre} no registró su salida a tiempo`, emp.empleado_id, JSON.stringify({ bloque, limiteSalida }), emp.empresa_id]);
                     }
                 }
             }
 
         } catch (err) {
-            logger.error(`[CRON SALIDAS] Error procesando empleado ${emp.empleado_id}:`, err);
+            logger.error(`[CRON SALIDAS] Error procesando empleado ${emp.empleado_id}: `, err);
         }
     }
 }

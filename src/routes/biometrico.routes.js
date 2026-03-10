@@ -30,7 +30,7 @@ router.get('/escritorio/:escritorioId', async (req, res) => {
         const { escritorioId } = req.params;
 
         const query = `
-      SELECT id, nombre, tipo, puerto, ip, estado, es_activo, escritorio_id 
+      SELECT id, nombre, tipo, puerto, ip, estado, es_activo, escritorio_id, device_id 
       FROM biometrico 
       WHERE escritorio_id = $1
     `;

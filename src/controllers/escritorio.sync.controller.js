@@ -25,12 +25,13 @@ export async function getDatosReferencia(req, res) {
         e.rfc
       FROM empleados e
       INNER JOIN usuarios u ON u.id = e.usuario_id
-      ${esSyncCompleto ? '' : 'WHERE GREATEST(EXTRACT(EPOCH FROM e.fecha_registro), EXTRACT(EPOCH FROM COALESCE(u.fecha_modificacion, e.fecha_registro))) * 1000 > $1'}
+      WHERE u.empresa_id = $1
+      ${esSyncCompleto ? '' : 'AND GREATEST(EXTRACT(EPOCH FROM e.fecha_registro), EXTRACT(EPOCH FROM COALESCE(u.fecha_modificacion, e.fecha_registro))) * 1000 > $2'}
     `;
 
     const empleados = await pool.query(
       empleadosQuery,
-      esSyncCompleto ? [] : [parseInt(desde)]
+      esSyncCompleto ? [req.empresa_id] : [req.empresa_id, parseInt(desde)]
     );
 
     // Consultar horarios activos
@@ -42,53 +43,16 @@ export async function getDatosReferencia(req, res) {
         fecha_inicio,
         fecha_fin
       FROM horarios
-      WHERE es_activo = true
-      ${esSyncCompleto ? '' : 'AND EXTRACT(EPOCH FROM COALESCE(fecha_modificacion, fecha_registro)) * 1000 > $1'}
+      WHERE es_activo = true AND empresa_id = $1
+      ${esSyncCompleto ? '' : 'AND EXTRACT(EPOCH FROM COALESCE(fecha_modificacion, fecha_registro)) * 1000 > $2'}
     `;
 
     const horarios = await pool.query(
       horariosQuery,
-      esSyncCompleto ? [] : [parseInt(desde)]
+      esSyncCompleto ? [req.empresa_id] : [req.empresa_id, parseInt(desde)]
     );
 
-    // Consultar tolerancias
-    const tolerancias = await pool.query(`
-      SELECT
-        id,
-        nombre,
-        minutos_retardo,
-        minutos_falta,
-        permite_registro_anticipado,
-        minutos_anticipado_max,
-        aplica_tolerancia_entrada,
-        aplica_tolerancia_salida
-      FROM tolerancias
-    `);
-
-    // Consultar usuarios_roles
-    const usuarios_roles = await pool.query(`
-      SELECT
-        ur.usuario_id,
-        ur.rol_id,
-        r.tolerancia_id,
-        r.posicion
-      FROM usuarios_roles ur
-      INNER JOIN roles r ON r.id = ur.rol_id
-      WHERE ur.es_activo = true
-    `);
-
-    // Consultar empleados_departamentos
-    const empleados_departamentos = await pool.query(`
-      SELECT
-        id,
-        empleado_id,
-        departamento_id,
-        es_activo
-      FROM empleados_departamentos
-      WHERE es_activo = true
-    `);
-
-    // Consultar credenciales (solo para empleados activos)
+    // Consultar credenciales (solo para empleados activos de la empresa)
     const credenciales = await pool.query(`
       SELECT
         c.id,
@@ -99,23 +63,20 @@ export async function getDatosReferencia(req, res) {
       FROM credenciales c
       INNER JOIN empleados e ON e.id = c.empleado_id
       INNER JOIN usuarios u ON u.id = e.usuario_id
-      WHERE u.estado_cuenta = 'activo'
-    `);
+      WHERE u.estado_cuenta = 'activo' AND u.empresa_id = $1
+    `, [req.empresa_id]);
 
     const timestamp = Date.now();
 
-    // Responder con todos los datos
+    // Responder solo con los datos necesarios para el Kiosco offline
     res.json({
       empleados: empleados.rows,
       horarios: horarios.rows,
-      tolerancias: tolerancias.rows,
-      usuarios_roles: usuarios_roles.rows,
-      empleados_departamentos: empleados_departamentos.rows,
       credenciales: credenciales.rows,
       timestamp
     });
 
-    console.log(`[Sync] ✅ Datos de referencia enviados: ${empleados.rows.length} empleados`);
+    console.log(`[Sync] ✅ Datos de referencia enviados: ${empleados.rows.length} empleados, ${horarios.rows.length} horarios, ${credenciales.rows.length} credenciales`);
 
   } catch (error) {
     console.error('[Sync] ❌ Error obteniendo datos de referencia:', error);
@@ -203,6 +164,9 @@ export async function sincronizarAsistenciasPendientes(req, res) {
         const fecha_registro = new Date(registro.fecha_registro);
 
         // Insertar en la base de datos
+        const horarioSnapshot = registro.horario_snapshot
+          ? (typeof registro.horario_snapshot === 'string' ? registro.horario_snapshot : JSON.stringify(registro.horario_snapshot))
+          : null;
         await pool.query(`
           INSERT INTO asistencias (
             id,
@@ -212,9 +176,10 @@ export async function sincronizarAsistenciasPendientes(req, res) {
             empleado_id,
             departamento_id,
             tipo,
-            fecha_registro
+            fecha_registro,
+            horario_snapshot
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `, [
           servidor_id,
           registro.estado || registro.clasificacion,
@@ -223,7 +188,8 @@ export async function sincronizarAsistenciasPendientes(req, res) {
           registro.empleado_id,
           registro.departamento_id,
           registro.tipo,
-          fecha_registro
+          fecha_registro,
+          horarioSnapshot
         ]);
 
         // Marcar como sincronizado

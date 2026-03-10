@@ -24,6 +24,89 @@ export async function registrarAsistencia(req, res) {
     }
 }
 
+/**
+ * GET /api/asistencias/estado/:empleadoId
+ * Evalúa el estado de asistencia actual (pre-flight) sin realizar inserciones en BD.
+ */
+export async function getPreflightEstadoAsistencia(req, res) {
+    try {
+        const { empleadoId } = req.params;
+        const empresaId = req.empresa_id;
+
+        const { tolerancia, horario } = await srvBuscarConfiguracion(empleadoId, empresaId);
+
+        const dateMxStr = new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
+        const fechaLocal = new Date(dateMxStr);
+        const fechaHoyStr = fechaLocal.getFullYear() + '-' +
+            String(fechaLocal.getMonth() + 1).padStart(2, '0') + '-' +
+            String(fechaLocal.getDate()).padStart(2, '0');
+        const minsHoraActual = fechaLocal.getHours() * 60 + fechaLocal.getMinutes();
+        const turnosHoy = srvObtenerTurnosDeHoy(horario, fechaLocal);
+
+        const bloqueActual = srvBuscarBloqueActual(turnosHoy, minsHoraActual, tolerancia.intervalo_bloques_minutos, tolerancia.minutos_anticipado_max, tolerancia.minutos_posterior_salida);
+
+        const registrosHoyQuery = await pool.query(
+            `SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = $2 ORDER BY fecha_registro ASC`,
+            [empleadoId, fechaHoyStr]
+        );
+
+        // Doble-tap lock visual (1 minuto)
+        if (registrosHoyQuery.rows.length > 0) {
+            const lastReg = registrosHoyQuery.rows[registrosHoyQuery.rows.length - 1];
+            if (new Date() - new Date(lastReg.fecha_registro) < 60000) {
+                return res.json({
+                    success: true,
+                    data: { puedeRegistrar: false, motivo: 'espera_un_minuto', estadoHorario: 'espera' }
+                });
+            }
+        }
+
+        const { cerrado, tipo: tipoCalculado, motivoCierre } = srvVerificarLongitudYTipo(
+            registrosHoyQuery.rows, bloqueActual, fechaHoyStr,
+            tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida,
+            tolerancia.minutos_anticipado_max, tolerancia.minutos_posterior_salida
+        );
+
+        if (cerrado) {
+            return res.json({
+                success: true,
+                data: {
+                    puedeRegistrar: false,
+                    motivo: motivoCierre === 'falta_previa' ? 'Acceso denegado: Falta directa registrada en turno.' : 'Bloque de horario completado.',
+                    estadoHorario: motivoCierre === 'falta_previa' ? 'falta_previa' : 'bloque_completo'
+                }
+            });
+        }
+
+        const vVentana = srvValidarVentanaDeRegistro(bloqueActual, minsHoraActual, tolerancia, tipoCalculado);
+        if (!vVentana.valido) {
+            return res.json({
+                success: true,
+                data: {
+                    puedeRegistrar: false,
+                    motivo: vVentana.mensaje,
+                    estadoHorario: vVentana.estadoHorario,
+                    tipoSiguienteRegistro: tipoCalculado
+                }
+            });
+        }
+
+        return res.json({
+            success: true,
+            data: {
+                puedeRegistrar: true,
+                motivo: 'OK',
+                estadoHorario: 'valido',
+                tipoSiguienteRegistro: tipoCalculado
+            }
+        });
+
+    } catch (error) {
+        console.error('Error preflight asistencia:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+}
+
 async function registrarAsistenciaMovil(req, res) {
     try {
         const { empleado_id, dispositivo_origen, ubicacion, departamento_id, tipo: tipoForzado, fecha_captura } = req.body;
@@ -50,7 +133,7 @@ async function registrarAsistenciaMovil(req, res) {
 
         // 5. Verificar longitud de bloque (calcula entrada o salida)
         // Obtener registros de asistencias del dia primero
-        const registrosHoyQuery = await pool.query(`SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE ORDER BY fecha_registro ASC`, [empleado_id]);
+        const registrosHoyQuery = await pool.query(`SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = $2 ORDER BY fecha_registro ASC`, [empleado_id, fechaHoyStr]);
 
         // Prevención de doble clic o peticiones concurrentes (1 minuto)
         if (registrosHoyQuery.rows.length > 0) {
@@ -101,16 +184,27 @@ async function registrarAsistenciaMovil(req, res) {
         const estadoFinal = srvEvaluarEstado(tipoFinal, minsHoraActual, bloqueActual, tolerancia);
 
         // -- REGISTRO DB --
+        // Formatear la fecha local a un String sin fragmentación TZ para evitar auto-conversión de PostgreSQL a UTC
+        const fechaRegistroSql = fechaLocal.toLocaleString('sv-SE', { timeZone: 'America/Mexico_City' });
+
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
+        const minsToHHMM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        const horarioSnapshot = bloqueActual
+            ? JSON.stringify({
+                inicio: minsToHHMM(bloqueActual.entrada),
+                fin: minsToHHMM(bloqueActual.salida),
+                turno_index: bloqueActual.index ?? null
+            })
+            : null;
         await pool.query(
-            `INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')} } ` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaLocal]
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id, fecha_registro, horario_snapshot) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')} } ` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaRegistroSql, horarioSnapshot]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
-            `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
+            `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5, $6)`,
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal }), fechaRegistroSql]
         );
 
         // 9. Aumentar conteo (si es retardo)
@@ -118,10 +212,10 @@ async function registrarAsistenciaMovil(req, res) {
         if (penalizacion && penalizacion.limiteAlcanzado) {
             // Se debe registrar la falta
             const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
-            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4, $5)`, [idFalta, empleado_id, departamento_id, req.empresa_id, fechaLocal]);
+            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4, $5)`, [idFalta, empleado_id, departamento_id, req.empresa_id, fechaRegistroSql]);
 
             const evFalta = await generateId(ID_PREFIXES.EVENTO);
-            await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo })]);
+            await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5, $6)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo }), fechaRegistroSql]);
 
             broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: fechaLocal });
         }
@@ -160,7 +254,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         // 4. Verificar dentro de turno (visual)
 
         // 5. Verificar longitud de bloque (calcula entrada o salida)
-        const registrosHoyQuery = await pool.query(`SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = CURRENT_DATE ORDER BY fecha_registro ASC`, [empleado_id]);
+        const registrosHoyQuery = await pool.query(`SELECT * FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = $2 ORDER BY fecha_registro ASC`, [empleado_id, fechaHoyStr]);
 
         // Prevención de doble clic o peticiones concurrentes (1 minuto)
         if (registrosHoyQuery.rows.length > 0) {
@@ -205,16 +299,27 @@ async function registrarAsistenciaEscritorio(req, res) {
         const estadoFinal = srvEvaluarEstado(tipoFinal, minsHoraActual, bloqueActual, tolerancia);
 
         // -- REGISTRO DB --
+        // Formatear la fecha local a un String sin fragmentación TZ para evitar auto-conversión de PostgreSQL a UTC
+        const fechaRegistroSql = fechaLocal.toLocaleString('sv-SE', { timeZone: 'America/Mexico_City' });
+
         const id = await generateId(ID_PREFIXES.ASISTENCIA);
+        const minsToHHMM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        const horarioSnapshot = bloqueActual
+            ? JSON.stringify({
+                inicio: minsToHHMM(bloqueActual.entrada),
+                fin: minsToHHMM(bloqueActual.salida),
+                turno_index: bloqueActual.index ?? null
+            })
+            : null;
         await pool.query(
-            `INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaLocal]
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro, horario_snapshot) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaRegistroSql, horarioSnapshot]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
-            `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal })]
+            `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5, $6)`,
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal }), fechaRegistroSql]
         );
 
         // 7. Aumentar conteo (si es retardo)
@@ -222,10 +327,10 @@ async function registrarAsistenciaEscritorio(req, res) {
         if (penalizacion && penalizacion.limiteAlcanzado) {
             // Se debe registrar la falta
             const idFalta = await generateId(ID_PREFIXES.ASISTENCIA);
-            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4, $5)`, [idFalta, empleado_id, departamento_id, req.empresa_id, fechaLocal]);
+            await pool.query(`INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro) VALUES($1, 'falta', 'sistema', $2, $3, 'sistema', $4, $5)`, [idFalta, empleado_id, departamento_id, req.empresa_id, fechaRegistroSql]);
 
             const evFalta = await generateId(ID_PREFIXES.EVENTO);
-            await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo })]);
+            await pool.query(`INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) VALUES($1, $2, $3, 'asistencia', 'alta', $4, $5, $6)`, [evFalta, 'Falta por Acumulación', penalizacion.motivo, empleado_id, JSON.stringify({ motivo: penalizacion.motivo }), fechaRegistroSql]);
 
             broadcast('nueva-asistencia', { id: idFalta, empleado_id, empleado_nombre: empleado.nombre, estado: 'falta', tipo: 'sistema', motivo: penalizacion.motivo, fecha: fechaLocal });
         }
@@ -715,5 +820,77 @@ export async function getEquivalenciasEmpleado(req, res) {
     } catch (error) {
         console.error('Error en getEquivalenciasEmpleado:', error);
         res.status(500).json({ success: false, message: 'Error al calcular equivalencias' });
+    }
+}
+
+/**
+ * GET /api/asistencias/movil/estado-boton/:empleadoId
+ * Devuelve si el botón de asistencia debe estar habilitado o no para el empleado
+ * según su horario actual. Solo para móvil.
+ */
+export async function getEstadoBotonMovil(req, res) {
+    try {
+        const { empleadoId } = req.params;
+        const empresa_id = req.empresa_id;
+
+        const { horario, tolerancia } = await srvBuscarConfiguracion(empleadoId, empresa_id);
+
+        if (!horario) {
+            return res.json({ success: true, habilitado: false, tipo: null, mensaje: 'Sin horario asignado' });
+        }
+
+        const dateMxStr = new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
+        const ahora = new Date(dateMxStr);
+        const minsAhora = ahora.getHours() * 60 + ahora.getMinutes();
+        const fechaHoyStr = ahora.getFullYear() + '-' +
+            String(ahora.getMonth() + 1).padStart(2, '0') + '-' +
+            String(ahora.getDate()).padStart(2, '0');
+
+        const turnosHoy = srvObtenerTurnosDeHoy(horario, ahora);
+        if (!turnosHoy || turnosHoy.length === 0) {
+            return res.json({ success: true, habilitado: false, tipo: null, mensaje: 'Sin turno asignado para hoy' });
+        }
+
+        const bloque = srvBuscarBloqueActual(
+            turnosHoy,
+            minsAhora,
+            tolerancia.intervalo_bloques_minutos,
+            tolerancia.minutos_anticipado_max,
+            tolerancia.minutos_posterior_salida
+        );
+
+        if (!bloque) {
+            return res.json({ success: true, habilitado: false, tipo: null, mensaje: 'Fuera de ventana de registro' });
+        }
+
+        const regsHoy = await pool.query(
+            `SELECT tipo, estado, fecha_registro FROM asistencias WHERE empleado_id = $1 AND DATE(fecha_registro) = $2 ORDER BY fecha_registro ASC`,
+            [empleadoId, fechaHoyStr]
+        );
+
+        const { cerrado, tipo } = srvVerificarLongitudYTipo(
+            regsHoy.rows, bloque, fechaHoyStr,
+            tolerancia.intervalo_bloques_minutos, tolerancia.requiere_salida,
+            tolerancia.minutos_anticipado_max, tolerancia.minutos_posterior_salida
+        );
+
+        if (cerrado) {
+            return res.json({ success: true, habilitado: false, tipo: 'completado', mensaje: 'El bloque de horario ya fue completado' });
+        }
+
+        return res.json({
+            success: true,
+            habilitado: true,
+            tipo,
+            mensaje: tipo === 'entrada' ? 'Puedes registrar tu entrada' : 'Puedes registrar tu salida',
+            bloque: {
+                entrada: `${String(Math.floor(bloque.entrada / 60)).padStart(2, '0')}:${String(bloque.entrada % 60).padStart(2, '0')}`,
+                salida: `${String(Math.floor(bloque.salida / 60)).padStart(2, '0')}:${String(bloque.salida % 60).padStart(2, '0')}`
+            }
+        });
+
+    } catch (error) {
+        console.error('[getEstadoBotonMovil] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al verificar estado del botón' });
     }
 }

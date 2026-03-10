@@ -20,7 +20,7 @@ export async function getEscritorios(req, res) {
                 e.sistema_operativo,
                 e.dispositivos_biometricos,
                 e.es_activo,
-                (SELECT COUNT(*) FROM biometrico b WHERE b.escritorio_id = e.id) as biometricos_count
+                (SELECT COUNT(*) FROM biometrico b WHERE b.escritorio_id = e.id AND b.es_activo = true) as biometricos_count
             FROM escritorio e
             WHERE e.empresa_id = $1
         `;
@@ -314,6 +314,13 @@ export async function deleteEscritorio(req, res) {
             });
         }
 
+        // Desactivar en cascada los biométricos asociados al escritorio
+        const bioResult = await pool.query(`
+            UPDATE biometrico SET es_activo = false
+            WHERE escritorio_id = $1 AND es_activo = true
+            RETURNING id
+        `, [id]);
+
         // Registrar evento
         await registrarEvento({
             titulo: 'Dispositivo de escritorio desactivado',
@@ -321,7 +328,7 @@ export async function deleteEscritorio(req, res) {
             tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
             prioridad: PRIORIDADES.ALTA,
             usuario_modificador_id: req.usuario?.id,
-            detalles: { escritorio_id: id }
+            detalles: { escritorio_id: id, biometricos_desactivados: bioResult.rowCount }
         });
 
         res.json({

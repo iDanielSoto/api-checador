@@ -448,7 +448,7 @@ export async function getReporteChecadasQuincena(req, res) {
 
         // Asistencias del período
         const asistRes = await pool.query(`
-            SELECT id, tipo, estado, fecha_registro, dispositivo_origen
+            SELECT id, tipo, estado, fecha_registro, dispositivo_origen, horario_snapshot
             FROM asistencias
             WHERE empleado_id = $1
               AND fecha_registro::date BETWEEN $2 AND $3
@@ -507,15 +507,33 @@ export async function getReporteChecadasQuincena(req, res) {
                     return `${String(f.getHours()).padStart(2, '0')}:${String(f.getMinutes()).padStart(2, '0')}`;
                 };
 
+                // Extraer snapshot del horario guardado al momento del checado.
+                // Si no existe (registro antiguo), usa el horario actual como fallback.
+                const snapshotEntrada = checadaEntrada?.horario_snapshot
+                    ? (typeof checadaEntrada.horario_snapshot === 'string'
+                        ? JSON.parse(checadaEntrada.horario_snapshot)
+                        : checadaEntrada.horario_snapshot)
+                    : null;
+                const snapshotSalida = checadaSalida?.horario_snapshot
+                    ? (typeof checadaSalida.horario_snapshot === 'string'
+                        ? JSON.parse(checadaSalida.horario_snapshot)
+                        : checadaSalida.horario_snapshot)
+                    : null;
+
+                // Horario de entrada: snapshot > config actual del turno
+                const horarioEntrada = snapshotEntrada?.inicio ?? horarioTurno?.entrada ?? null;
+                // Horario de salida: snapshot > config actual del turno
+                const horarioSalida = snapshotSalida?.fin ?? snapshotEntrada?.fin ?? horarioTurno?.salida ?? null;
+
                 turnos.push({
                     turno: t + 1,
                     entrada: {
-                        horario: horarioTurno?.entrada || null,
+                        horario: horarioEntrada,
                         checada: formatHora(checadaEntrada?.fecha_registro),
                         estado: checadaEntrada?.estado || null
                     },
                     salida: {
-                        horario: horarioTurno?.salida || null,
+                        horario: horarioSalida,
                         checada: formatHora(checadaSalida?.fecha_registro),
                         estado: checadaSalida?.estado || null
                     }
