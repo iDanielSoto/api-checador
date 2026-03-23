@@ -336,7 +336,17 @@ async function registrarAsistenciaEscritorio(req, res) {
         }
 
         broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: fechaLocal });
-        res.status(201).json({ success: true, message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `, data: { id, tipo: tipoFinal, estado: estadoFinal } });
+        res.status(201).json({ 
+            success: true, 
+            message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `, 
+            data: { 
+                id, 
+                tipo: tipoFinal, 
+                estado: estadoFinal,
+                fecha_registro: fechaLocal.toISOString(),
+                hora: fechaRegistroSql.split(' ')[1].substring(0, 5)
+            } 
+        });
 
     } catch (error) {
         console.error(error);

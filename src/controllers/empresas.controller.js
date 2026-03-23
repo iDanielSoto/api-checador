@@ -137,7 +137,9 @@ export async function getEmpresaById(req, res) {
                 e.*,
                 c.*,
                 e.id as id,
-                e.nombre as nombre
+                e.nombre as nombre,
+                (SELECT COUNT(*) FROM departamentos d WHERE d.empresa_id = e.id AND d.es_activo = true) as total_departamentos,
+                (SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id = e.id AND u.estado_cuenta = 'activo') as total_usuarios
             FROM empresas e
             LEFT JOIN configuraciones c ON c.id = e.configuracion_id
             WHERE e.id = $1
@@ -179,6 +181,8 @@ export async function createEmpresa(req, res) {
             correo,
             admin_usuario, // Creado especialmente para el SaaS frontend
             admin_correo,
+            departamento_nombre,
+            departamento_ubicacion,
             // Configuración inicial
             idioma = 'es',
             formato_fecha = 'DD/MM/YYYY',
@@ -190,10 +194,10 @@ export async function createEmpresa(req, res) {
             fecha_vencimiento = null
         } = req.body;
 
-        if (!nombre || !admin_usuario || !admin_correo) {
+        if (!nombre || !admin_usuario || !admin_correo || !departamento_nombre) {
             return res.status(400).json({
                 success: false,
-                message: 'Faltan campos obligatorios para el aprovisionamiento (Nombre Empresa, Usuario Admin, Correo Admin)'
+                message: 'Faltan campos obligatorios para el aprovisionamiento (Nombre Empresa, Usuario Admin, Correo Admin, Departamento Inicial)'
             });
         }
 
@@ -274,6 +278,13 @@ export async function createEmpresa(req, res) {
             `, [urlId, usuarioId, rolAdminId]);
         }
 
+        // 7. Crear el departamento inicial
+        const deptoId = await generateId(ID_PREFIXES.DEPARTAMENTO);
+            // Insertar el departamento inicial con posible ubicación
+            await client.query(`
+                INSERT INTO departamentos (id, nombre, descripcion, es_activo, empresa_id, ubicacion)
+                VALUES ($1, $2, $3, true, $4, $5)
+            `, [deptoId, departamento_nombre, 'Departamento principal asignado en el aprovisionamiento', empresaId, departamento_ubicacion || null]);
 
         await client.query('COMMIT');
 

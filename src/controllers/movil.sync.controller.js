@@ -7,6 +7,34 @@ import {
     srvBuscarBloqueActual,
     srvEvaluarEstado
 } from '../services/asistencias.service.js';
+import { extractDescriptorFromImage } from '../services/faceRecognition.service.js';
+
+function base64ToFloat32Array(base64) {
+    const buffer = Buffer.from(base64, 'base64');
+    return new Float32Array(buffer.buffer, buffer.byteOffset, buffer.length / 4);
+}
+
+function byteaToFloat32Array(bytea) {
+    if (Buffer.isBuffer(bytea)) {
+        return new Float32Array(bytea.buffer, bytea.byteOffset, bytea.length / 4);
+    }
+    if (typeof bytea === 'string') {
+        return base64ToFloat32Array(bytea);
+    }
+    throw new Error('Formato de BYTEA no reconocido');
+}
+
+function calcularDistanciaEuclidiana(desc1, desc2) {
+    if (desc1.length !== desc2.length) {
+        throw new Error(`Descriptores de diferente longitud: ${desc1.length} vs ${desc2.length}`);
+    }
+    let suma = 0;
+    for (let i = 0; i < desc1.length; i++) {
+        const diff = desc1[i] - desc2[i];
+        suma += diff * diff;
+    }
+    return Math.sqrt(suma);
+}
 
 /**
  * GET /api/movil/sync/mis-datos
@@ -34,6 +62,7 @@ export const getMisDatos = async (req, res) => {
                     u.usuario,
                     u.correo,
                     u.foto,
+                    u.empresa_id,
                     (u.estado_cuenta = 'activo') as es_activo,
                     e.rfc,
                     e.horario_id
@@ -75,41 +104,16 @@ export const getMisDatos = async (req, res) => {
             return res.status(500).json({ success: false, error: `Error en query credenciales: ${credError.message}` });
         }
 
-        // ========== TOLERANCIA (vía rol del usuario) ==========
+        // ========== TOLERANCIA (vía empresa del usuario) ==========
         let tolerancia = null;
         try {
-            const rolResult = await pool.query(`
-                SELECT
-                    ur.rol_id,
-                    r.tolerancia_id
-                FROM usuarios_roles ur
-                INNER JOIN roles r ON ur.rol_id = r.id
-                WHERE ur.usuario_id = $1 AND ur.es_activo = true
-                LIMIT 1
-            `, [empleado.usuario_id]);
-
-            if (rolResult.rows.length > 0 && rolResult.rows[0].tolerancia_id) {
-                const tolResult = await pool.query(`
-                    SELECT
-                        id,
-                        nombre,
-                        minutos_retardo,
-                        minutos_falta,
-                        permite_registro_anticipado,
-                        minutos_anticipado_max,
-                        aplica_tolerancia_entrada,
-                        aplica_tolerancia_salida
-                    FROM tolerancias
-                    WHERE id = $1
-                `, [rolResult.rows[0].tolerancia_id]);
-
-                if (tolResult.rows.length > 0) {
-                    tolerancia = tolResult.rows[0];
-                }
+            if (empleado.empresa_id) {
+                const configAsistencias = await srvBuscarConfiguracion(empleado.id, empleado.empresa_id);
+                tolerancia = configAsistencias.tolerancia;
             }
         } catch (tolError) {
-            console.error('❌ [movilSync] Error en query TOLERANCIA:', tolError);
-            return res.status(500).json({ success: false, error: `Error en query tolerancia: ${tolError.message}` });
+            console.error('❌ [movilSync] Error obteniendo configuración y tolerancia:', tolError);
+            return res.status(500).json({ success: false, error: `Error en función srvBuscarConfiguracion: ${tolError.message}` });
         }
 
         // ========== DEPARTAMENTOS ==========
@@ -186,9 +190,9 @@ export const sincronizarAsistencias = async (req, res) => {
                     continue;
                 }
 
-                // Verificar que el empleado existe
+                // Verificar que el empleado existe y cargar su empresa
                 const empCheck = await pool.query(
-                    'SELECT id FROM empleados WHERE id = $1',
+                    'SELECT e.id, u.empresa_id FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1',
                     [reg.empleado_id]
                 );
 
@@ -227,17 +231,70 @@ export const sincronizarAsistencias = async (req, res) => {
                     continue;
                 }
 
+                // --- Verificación Facial en Offline ---
+                if (reg.metodo_registro === 'FACIAL') {
+                    if (!reg.imagen_base64) {
+                        rechazados.push({
+                            id_local: reg.id,
+                            error: 'Falta imagen facial para validación offline',
+                            codigo: 'IMAGEN_FACIAL_FALTANTE'
+                        });
+                        continue;
+                    }
+
+                    try {
+                        const resFacial = await pool.query('SELECT facial FROM credenciales WHERE empleado_id = $1', [reg.empleado_id]);
+                        if (resFacial.rows.length === 0 || !resFacial.rows[0].facial) {
+                            rechazados.push({
+                                id_local: reg.id,
+                                error: 'Empleado no tiene rostro registrado',
+                                codigo: 'ROSTRO_NO_REGISTRADO'
+                            });
+                            continue;
+                        }
+
+                        const descriptorRegistrado = byteaToFloat32Array(resFacial.rows[0].facial);
+                        const base64Data = reg.imagen_base64.replace(/^data:image\/\w+;base64,/, '');
+                        const imageBuffer = Buffer.from(base64Data, 'base64');
+                        const descriptorRecibido = await extractDescriptorFromImage(imageBuffer);
+
+                        if (!descriptorRecibido) {
+                            rechazados.push({
+                                id_local: reg.id,
+                                error: 'No se detectó un rostro válido en la imagen proporcionada',
+                                codigo: 'ROSTRO_INVALIDO'
+                            });
+                            continue;
+                        }
+
+                        const UMBRAL_DISTANCIA = 0.6;
+                        const distancia = calcularDistanciaEuclidiana(descriptorRecibido, descriptorRegistrado);
+
+                        if (distancia >= UMBRAL_DISTANCIA) {
+                            rechazados.push({
+                                id_local: reg.id,
+                                error: 'El rostro no coincide con el registrado (distancia: ' + distancia.toFixed(4) + ')',
+                                codigo: 'IDENTIDAD_INVALIDA'
+                            });
+                            continue;
+                        }
+                    } catch (e) {
+                        rechazados.push({
+                            id_local: reg.id,
+                            error: 'Error validando rostro: ' + e.message,
+                            codigo: 'ERROR_VALIDACION_FACIAL'
+                        });
+                        continue;
+                    }
+                }
+
                 // --- Re-evaluación del estado y captura del snapshot horario ---
                 let estadoCalculado = reg.estado || reg.clasificacion || 'pendiente';
                 let horarioSnapshot = null;
 
                 try {
-                    const empQuery = await pool.query(
-                        'SELECT u.empresa_id FROM empleados e JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1',
-                        [reg.empleado_id]
-                    );
-                    if (empQuery.rows.length > 0) {
-                        const empresaId = empQuery.rows[0].empresa_id;
+                    const empresaId = empCheck.rows[0].empresa_id;
+                    if (empresaId) {
                         const { tolerancia, horario } = await srvBuscarConfiguracion(reg.empleado_id, empresaId);
 
                         const fechaSync = new Date(fecha);
@@ -283,7 +340,11 @@ export const sincronizarAsistencias = async (req, res) => {
                     `, [reg.empleado_id]);
 
                     if (empEmpresa.rows.length > 0) {
-                        const segmentosRed = empEmpresa.rows[0].segmentos_red || [];
+                        let segmentosRed = empEmpresa.rows[0].segmentos_red;
+                        if (typeof segmentosRed === 'string') {
+                            try { segmentosRed = JSON.parse(segmentosRed); } catch { segmentosRed = []; }
+                        }
+                        segmentosRed = segmentosRed || [];
 
                         let coordenadas = null;
                         if (reg.ubicacion && Array.isArray(reg.ubicacion) && reg.ubicacion.length >= 2) {

@@ -459,3 +459,5 @@ export async function loginPorPin(req, res) {
         res.status(500).json({ success: false, message: 'Error al iniciar sesión con PIN' });
     }
 }
+
+// QUE ALV  apaga bd puta maaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaadre

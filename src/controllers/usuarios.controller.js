@@ -10,7 +10,7 @@ import { broadcast } from '../utils/sse.js';
  */
 export async function getUsuarios(req, res) {
     try {
-        const { estado, es_empleado, buscar, limit = 50, offset = 0 } = req.query;
+        const { estado, es_empleado, buscar, limit = 1000, offset = 0 } = req.query;
 
         let query = `
             SELECT

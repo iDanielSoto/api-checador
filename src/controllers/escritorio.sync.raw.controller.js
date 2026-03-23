@@ -51,7 +51,14 @@ export async function sincronizarRawPunch(req, res) {
 
             // Si la asistencia fue validada y persistida sin problemas...
             if (capturedResponseStatus === 201 || (capturedResponseData && capturedResponseData.success)) {
-                sincronizados.push({ id_local: registro.id, mensaje: 'Sincronizado' });
+                const { tipo, estado, hora, fecha_registro } = capturedResponseData.data;
+                sincronizados.push({ 
+                    id_local: registro.id, 
+                    tipo, 
+                    estado, 
+                    hora, 
+                    fecha_registro 
+                });
             } else {
                 rechazados.push({ id_local: registro.id, error: capturedResponseData?.message || 'Error desconocido' });
             }

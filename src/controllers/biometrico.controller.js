@@ -347,3 +347,70 @@ export async function getStatsBiometrico(req, res) {
         });
     }
 }
+
+/**
+ * POST /api/biometrico/sync-status
+ * Sincroniza el estado de las cámaras de un kiosko/escritorio
+ */
+export async function syncBiometricoStatus(req, res) {
+    const client = await pool.connect();
+    try {
+        const { escritorio_id, device_ids } = req.body;
+
+        if (!escritorio_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'escritorio_id es requerido'
+            });
+        }
+
+        if (!Array.isArray(device_ids)) {
+            return res.status(400).json({
+                success: false,
+                message: 'device_ids debe ser un arreglo'
+            });
+        }
+
+        await client.query('BEGIN');
+
+        // 1. Poner todo en "desconectado" por defecto para este kiosko
+        await client.query(`
+            UPDATE biometrico 
+            SET estado = 'desconectado' 
+            WHERE escritorio_id = $1
+        `, [escritorio_id]);
+
+        // 2. Encender solo las conectadas que coincidan
+        if (device_ids.length > 0) {
+            await client.query(`
+                UPDATE biometrico 
+                SET estado = 'conectado' 
+                WHERE escritorio_id = $1 AND device_id = ANY($2)
+            `, [escritorio_id, device_ids]);
+        }
+
+        // 3. Devolver las cámaras autorizadas
+        const result = await client.query(`
+            SELECT * 
+            FROM biometrico 
+            WHERE escritorio_id = $1 AND estado = 'conectado'
+        `, [escritorio_id]);
+
+        await client.query('COMMIT');
+
+        res.json({
+            success: true,
+            data: result.rows
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en syncBiometricoStatus:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al sincronizar estado de biométricos'
+        });
+    } finally {
+        client.release();
+    }
+}

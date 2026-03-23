@@ -63,7 +63,8 @@ export async function updateConfiguracionEscritorio(req, res) {
             pin_administrador,
             metodos_autenticacion,
             prioridad_biometrico,
-            es_activo
+            es_activo,
+            es_mantenimiento
         } = req.body;
 
         const metodosJson = metodos_autenticacion ? JSON.stringify(metodos_autenticacion) : null;
@@ -81,13 +82,14 @@ export async function updateConfiguracionEscritorio(req, res) {
                 metodos_autenticacion = COALESCE($8, metodos_autenticacion),
                 es_activo = COALESCE($9, es_activo),
                 prioridad_biometrico = COALESCE($11, prioridad_biometrico),
+                es_mantenimiento = COALESCE($12, es_mantenimiento),
                 actualizado_en = CURRENT_TIMESTAMP
             WHERE escritorio_id = $10
             RETURNING *
         `, [
             sincronizacion_automatica, frecuencia_sincronizacion_min, modo_offline_permitido,
             iniciar_con_windows, forzar_pantalla_completa, bloquear_cierre_app,
-            pin_administrador, metodosJson, es_activo, escritorio_id, prioridadJson
+            pin_administrador, metodosJson, es_activo, escritorio_id, prioridadJson, es_mantenimiento
         ]);
 
         if (result.rows.length === 0) {

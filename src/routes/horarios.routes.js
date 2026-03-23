@@ -6,7 +6,8 @@ import {
     updateHorario,
     deleteHorario,
     reactivarHorario,
-    asignarHorario
+    asignarHorario,
+    importarHorariosCsv
 } from '../controllers/horarios.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { verificarEmpresa } from '../middleware/tenant.middleware.js';
@@ -24,5 +25,6 @@ router.put('/:id', requirePermiso('HORARIO_MODIFICAR'), updateHorario);
 router.delete('/:id', requirePermiso('HORARIO_SOFTDELETE'), deleteHorario);
 router.patch('/:id/reactivar', requirePermiso('HORARIO_MODIFICAR'), reactivarHorario);
 router.post('/:id/asignar', requirePermiso('HORARIO_ASIGNAR'), asignarHorario);
+router.post('/sistema/importar', requirePermiso('HORARIO_CREAR'), importarHorariosCsv);
 
 export default router;

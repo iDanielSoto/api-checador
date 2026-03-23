@@ -17,9 +17,13 @@ export async function getHorarios(req, res) {
                 h.fecha_fin,
                 h.configuracion,
                 h.es_activo,
-                e.id as empleado_id,
-                u.nombre as empleado_nombre,
-                u.correo as empleado_correo
+                json_agg(
+                    json_build_object(
+                        'id', e.id,
+                        'nombre', u.nombre,
+                        'correo', u.correo
+                    )
+                ) FILTER (WHERE e.id IS NOT NULL) as empleados
             FROM horarios h
             LEFT JOIN empleados e ON e.horario_id = h.id
             LEFT JOIN usuarios u ON u.id = e.usuario_id
@@ -38,7 +42,7 @@ export async function getHorarios(req, res) {
             params.push(`%${buscar}%`);
         }
 
-        query += ` ORDER BY h.fecha_inicio DESC`;
+        query += ` GROUP BY h.id ORDER BY h.fecha_inicio DESC`;
 
         const resultado = await pool.query(query, params);
 
@@ -57,6 +61,268 @@ export async function getHorarios(req, res) {
 }
 
 /**
+ * POST /api/horarios/asignar
+ * Asigna un horario existente a uno o varios empleados.
+ */
+export async function asignarHorario(req, res) {
+    const client = await pool.connect();
+    try {
+        const { horario_id, empleados_ids } = req.body;
+
+        if (!horario_id || !empleados_ids || !Array.isArray(empleados_ids) || empleados_ids.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'horario_id y un array de empleados_ids son requeridos.'
+            });
+        }
+
+        await client.query('BEGIN');
+
+        // Verificar que el horario existe y pertenece a la empresa
+        const horarioExistente = await client.query(
+            'SELECT id FROM horarios WHERE id = $1 AND empresa_id = $2',
+            [horario_id, req.empresa_id]
+        );
+
+        if (horarioExistente.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({
+                success: false,
+                message: 'Horario no encontrado o no pertenece a esta empresa.'
+            });
+        }
+
+        // Asignar el horario a los empleados
+        // Nota: empleados no tiene empresa_id, se verifica a través de usuarios
+        const resultado = await client.query(`
+            UPDATE empleados
+            SET horario_id = $1
+            WHERE id = ANY($2) AND EXISTS (
+                SELECT 1 FROM usuarios u WHERE u.id = empleados.usuario_id AND u.empresa_id = $3
+            )
+            RETURNING id
+        `, [horario_id, empleados_ids, req.empresa_id]);
+
+        if (resultado.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({
+                success: false,
+                message: 'Ninguno de los empleados especificados fue encontrado o pertenece a esta empresa.'
+            });
+        }
+
+        await client.query('COMMIT');
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Horario asignado',
+            descripcion: `Se asignó el horario ${horario_id} a ${resultado.rows.length} empleado(s).`,
+            tipo_evento: TIPOS_EVENTO.HORARIO,
+            prioridad: PRIORIDADES.MEDIA,
+            empleado_id: empleados_ids[0], // Podríamos registrar para el primer empleado o iterar
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { horario_id, empleados_ids: resultado.rows.map(row => row.id) }
+        });
+
+        res.json({
+            success: true,
+            message: `Horario ${horario_id} asignado a ${resultado.rows.length} empleado(s) correctamente.`,
+            data: {
+                horario_id,
+                empleados_asignados: resultado.rows.map(row => row.id)
+            }
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en asignarHorario:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al asignar horario'
+        });
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * POST /api/horarios/sistema/importar
+ * Endpoint para recibir JSON pre-parseado desde el frontend con formato CSV del Tec
+ */
+export async function importarHorariosCsv(req, res) {
+    const client = await pool.connect();
+    try {
+        const { registros } = req.body;
+        
+        if (!registros || !Array.isArray(registros)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Formato inválido. Se esperaba un array de registros desde el CSV.' 
+            });
+        }
+
+        await client.query('BEGIN');
+
+        let procesados = 0;
+        let errores = [];
+
+        // Precargar empleados (empleados no tiene empresa_id, buscar por u.empresa_id)
+        const empleadosRes = await client.query(`
+            SELECT e.id, e.rfc, e.horario_id 
+            FROM empleados e 
+            INNER JOIN usuarios u ON u.id = e.usuario_id 
+            WHERE u.empresa_id = $1
+        `, [req.empresa_id]);
+        const empleadosMap = {};
+        empleadosRes.rows.forEach(e => {
+            if (e.rfc) empleadosMap[e.rfc.toUpperCase().trim()] = e;
+        });
+
+        for (let i = 0; i < registros.length; i++) {
+            const row = registros[i];
+            const rfcInput = (row.RFC || '').toUpperCase().trim();
+            const filaNum = i + 2; // +1 por el indice 0 y +1 por el header
+
+            if (!rfcInput) {
+                continue; // Saltar filas vacías
+            }
+
+            const empleadoDb = empleadosMap[rfcInput];
+            if (!empleadoDb) {
+                errores.push(`Fila ${filaNum}: No se encontró un empleado activo con el RFC '${rfcInput}'`);
+                continue;
+            }
+
+            if (empleadoDb.horario_id) {
+                errores.push(`Fila ${filaNum}: El empleado '${rfcInput}' ya tiene un horario asignado en el sistema.`);
+                continue;
+            }
+
+            // Construir configuración
+            const timeReg = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+            const config = { lunes: [], martes: [], miercoles: [], jueves: [], viernes: [], sabado: [], domingo: [] };
+            let erroresFila = [];
+            
+            const mapDia = (diaKey, csvKeyInicio, csvKeyFin) => {
+                const inicio = row[csvKeyInicio]?.trim();
+                const fin = row[csvKeyFin]?.trim();
+                
+                if (!inicio && !fin) return; // Día libre, no hay error
+
+                if (inicio && !fin) {
+                    erroresFila.push(`Día ${diaKey} incompleto (falta hora de fin).`);
+                    return;
+                }
+                if (!inicio && fin) {
+                    erroresFila.push(`Día ${diaKey} incompleto (falta hora de inicio).`);
+                    return;
+                }
+
+                if (!timeReg.test(inicio)) {
+                    erroresFila.push(`Día ${diaKey} hora de inicio (${inicio}) tiene formato inválido.`);
+                    return;
+                }
+                if (!timeReg.test(fin)) {
+                    erroresFila.push(`Día ${diaKey} hora de fin (${fin}) tiene formato inválido.`);
+                    return;
+                }
+
+                if (inicio >= fin) {
+                    erroresFila.push(`Día ${diaKey}: La hora de inicio (${inicio}) debe ser menor estricto a la hora de fin (${fin}).`);
+                    return;
+                }
+
+                config[diaKey].push({ inicio, fin });
+            };
+
+            mapDia('lunes', 'Lunes_Inicio', 'Lunes_Fin');
+            mapDia('martes', 'Martes_Inicio', 'Martes_Fin');
+            mapDia('miercoles', 'Miercoles_Inicio', 'Miercoles_Fin');
+            mapDia('jueves', 'Jueves_Inicio', 'Jueves_Fin');
+            mapDia('viernes', 'Viernes_Inicio', 'Viernes_Fin');
+            mapDia('sabado', 'Sabado_Inicio', 'Sabado_Fin');
+            mapDia('domingo', 'Domingo_Inicio', 'Domingo_Fin');
+
+            if (erroresFila.length > 0) {
+                errores.push(`Fila ${filaNum} [${rfcInput}]:\n  - ${erroresFila.join('\n  - ')}`);
+                continue;
+            }
+
+            const tipoPeriodo = row.TipoPeriodo?.toLowerCase().trim() === 'intersemestral' ? 'intersemestral' : 'semestral';
+
+            const configuracionJson = JSON.stringify({
+                configuracion_semanal: config,
+                tipo_periodo: tipoPeriodo,
+                excepciones: {}
+            });
+
+            const horarioId = await generateId(ID_PREFIXES.HORARIO);
+            const hoyStr = new Date().toISOString().split('T')[0];
+
+            await client.query(`
+                INSERT INTO horarios (id, fecha_inicio, fecha_fin, configuracion, es_activo, empresa_id)
+                VALUES ($1, $2, null, $3, true, $4)
+            `, [horarioId, hoyStr, configuracionJson, req.empresa_id]);
+
+            // Desvincular cualquier horario previo de ese empleado solo por limpieza (opcional)
+            await client.query(`
+                UPDATE empleados 
+                SET horario_id = $1 
+                WHERE id = $2
+            `, [horarioId, empleadoId]);
+
+            procesados++;
+        }
+
+        if (procesados === 0 && errores.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+                success: false,
+                message: errores
+            });
+        }
+
+        await client.query('COMMIT');
+
+        // Registrar evento
+        await registrarEvento({
+            titulo: 'Horarios importados CSV',
+            descripcion: `Se importaron ${procesados} horarios masivamente vía CSV.`,
+            tipo_evento: TIPOS_EVENTO.HORARIO,
+            prioridad: PRIORIDADES.MEDIA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { procesados, fallidos: errores.length }
+        });
+
+        // Modificamos el mensaje si hubo errores pero algunos pasaron
+        if (errores.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: ['Algunas filas no se procesaron:', ...errores],
+                meta: { procesados, fallidos: errores }
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `¡Importación exitosa! Se han procesado y asignado ${procesados} registros correctamente.`,
+            meta: { procesados, fallidos: errores }
+        });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en importarHorariosCsv:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error en el servidor al intentar importar horarios masivos.', 
+            error: error.message 
+        });
+    } finally {
+        client.release();
+    }
+}
+
+/**
  * GET /api/horarios/:id
  * Obtiene un horario por ID con información del empleado
  */
@@ -71,12 +337,17 @@ export async function getHorarioById(req, res) {
                 h.fecha_fin,
                 h.configuracion,
                 h.es_activo,
-                e.id as empleado_id,
-                u.nombre as empleado_nombre
+                json_agg(
+                    json_build_object(
+                        'id', e.id,
+                        'nombre', u.nombre
+                    )
+                ) FILTER (WHERE e.id IS NOT NULL) as empleados
             FROM horarios h
             LEFT JOIN empleados e ON e.horario_id = h.id
             LEFT JOIN usuarios u ON u.id = e.usuario_id
             WHERE h.id = $1 AND h.empresa_id = $2
+            GROUP BY h.id
         `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
@@ -110,6 +381,7 @@ export async function createHorario(req, res) {
     try {
         const {
             empleado_id,
+            empleados_ids,
             fecha_inicio,
             fecha_fin,
             configuracion,
@@ -123,12 +395,7 @@ export async function createHorario(req, res) {
             });
         }
 
-        if (!empleado_id) {
-            return res.status(400).json({
-                success: false,
-                message: 'empleado_id es requerido'
-            });
-        }
+
 
         await client.query('BEGIN');
 
@@ -141,12 +408,16 @@ export async function createHorario(req, res) {
             RETURNING *
         `, [id, fecha_inicio, fecha_fin, JSON.stringify(configuracion), es_activo, req.empresa_id]);
 
-        // Asignar el horario al empleado
-        await client.query(`
-            UPDATE empleados 
-            SET horario_id = $1
-            WHERE id = $2
-        `, [id, empleado_id]);
+        const targetIds = empleados_ids || (empleado_id ? [empleado_id] : []);
+
+        // Asignar el horario a los empleados
+        if (targetIds.length > 0) {
+            await client.query(`
+                UPDATE empleados 
+                SET horario_id = $1
+                WHERE id = ANY($2)
+            `, [id, targetIds]);
+        }
 
         await client.query('COMMIT');
 
@@ -193,6 +464,7 @@ export async function updateHorario(req, res) {
         const { id } = req.params;
         const {
             empleado_id,
+            empleados_ids,
             fecha_inicio,
             fecha_fin,
             configuracion,
@@ -221,21 +493,25 @@ export async function updateHorario(req, res) {
             });
         }
 
-        // Si se proporciona empleado_id, actualizar la asignación
-        if (empleado_id) {
-            // Primero, quitar este horario de otros empleados
+        const targetIds = empleados_ids || (empleado_id ? [empleado_id] : null);
+
+        // Si se proporciona empleados_ids o empleado_id explícitamente, actualizar la asignación
+        if (targetIds !== null) {
+            // Primero, quitar este horario de todos los empleados
             await client.query(`
                 UPDATE empleados 
                 SET horario_id = NULL
                 WHERE horario_id = $1
             `, [id]);
 
-            // Asignar al nuevo empleado
-            await client.query(`
-                UPDATE empleados 
-                SET horario_id = $1
-                WHERE id = $2
-            `, [id, empleado_id]);
+            // Asignar a los nuevos empleados seleccionados
+            if (targetIds.length > 0) {
+                await client.query(`
+                    UPDATE empleados 
+                    SET horario_id = $1
+                    WHERE id = ANY($2)
+                `, [id, targetIds]);
+            }
         }
 
         await client.query('COMMIT');
@@ -383,72 +659,6 @@ export async function reactivarHorario(req, res) {
             success: false,
             message: 'Error al reactivar horario'
         });
-    }
-}
-
-/**
- * POST /api/horarios/:id/asignar
- * Asigna un horario a uno o varios empleados
- */
-export async function asignarHorario(req, res) {
-    const client = await pool.connect();
-
-    try {
-        const { id } = req.params;
-        const { empleados_ids } = req.body;
-
-        if (!empleados_ids || !Array.isArray(empleados_ids)) {
-            return res.status(400).json({
-                success: false,
-                message: 'empleados_ids debe ser un array'
-            });
-        }
-
-        await client.query('BEGIN');
-
-        // Verificar que el horario existe
-        const horario = await client.query('SELECT id FROM horarios WHERE id = $1', [id]);
-        if (horario.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({
-                success: false,
-                message: 'Horario no encontrado'
-            });
-        }
-
-        // Asignar a cada empleado
-        const actualizados = await client.query(`
-            UPDATE empleados SET horario_id = $1
-            WHERE id = ANY($2)
-            RETURNING id
-        `, [id, empleados_ids]);
-
-        await client.query('COMMIT');
-
-        // Registrar evento
-        await registrarEvento({
-            titulo: 'Horario asignado',
-            descripcion: `Se asignó el horario ${id} a ${actualizados.rowCount} empleado(s)`,
-            tipo_evento: TIPOS_EVENTO.HORARIO,
-            prioridad: PRIORIDADES.MEDIA,
-            usuario_modificador_id: req.usuario?.id,
-            detalles: { horario_id: id, empleados_ids }
-        });
-
-        res.json({
-            success: true,
-            message: `Horario asignado a ${actualizados.rowCount} empleado(s)`
-        });
-
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('Error en asignarHorario:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al asignar horario'
-        });
-    } finally {
-        client.release();
     }
 }
 

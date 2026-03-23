@@ -9,7 +9,7 @@ import { broadcast } from '../utils/sse.js';
  */
 export async function getEmpleados(req, res) {
     try {
-        const { departamento_id, buscar, limit = 50, offset = 0 } = req.query;
+        const { departamento_id, buscar, limit = 1000, offset = 0 } = req.query;
 
         let query = `
             SELECT

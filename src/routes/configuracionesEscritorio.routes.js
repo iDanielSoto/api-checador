@@ -8,11 +8,13 @@ import {
 
 const router = express.Router();
 
-// Todas las rutas requieren estar autenticado
+// Ruta pública para que el escritorio obtenga su configuración sin token
+router.get('/:escritorio_id', getConfiguracionEscritorio);
+
+// Las siguientes rutas requieren estar autenticado
 router.use(verificarAutenticacion);
 
-// Solo usuarios con permisos pueden ver o modificar estas configuraciones
-router.get('/:escritorio_id', requirePermiso('DISPOSITIVO_MODIFICAR'), getConfiguracionEscritorio);
+// Solo usuarios con permisos pueden modificar estas configuraciones
 router.put('/:escritorio_id', requirePermiso('DISPOSITIVO_MODIFICAR'), updateConfiguracionEscritorio);
 
 export default router;

@@ -7,7 +7,8 @@ import {
     getDetalleIncidencias,
     getReporteDesempeno,
     getComparativaDepartamentos,
-    getReporteChecadasQuincena
+    getReporteChecadasQuincena,
+    getReporteIncidenciasRRHH
 } from '../controllers/reportes.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { verificarEmpresa } from '../middleware/tenant.middleware.js';
@@ -33,5 +34,6 @@ router.get('/desempeno', requirePermiso('REPORTE_EXPORTAR'), getReporteDesempeno
 
 // Reporte Quincena (formato RRHH TecNM)
 router.get('/checadas/quincena', requirePermiso('REPORTE_EXPORTAR', 'REGISTRO_VER'), getReporteChecadasQuincena);
+router.get('/incidencias/rrhh', requirePermiso('REPORTE_EXPORTAR', 'REGISTRO_VER'), getReporteIncidenciasRRHH);
 
 export default router;

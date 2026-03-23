@@ -6,10 +6,10 @@ import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
  */
 export async function getDatosReferencia(req, res) {
   try {
-    const { desde } = req.query; // Timestamp opcional
+    const { desde, escritorio_id } = req.query; // Parámetros opcionales
     const esSyncCompleto = !desde;
 
-    console.log(`[Sync] Obteniendo datos de referencia ${esSyncCompleto ? '(completo)' : '(incremental)'}`);
+    console.log(`[Sync] Obteniendo datos de referencia ${esSyncCompleto ? '(completo)' : '(incremental)'}${escritorio_id ? ` para escritorio ${escritorio_id}` : ''}`);
 
     // Consultar empleados activos (incluye usuario y correo para búsqueda offline)
     const empleadosQuery = `
@@ -68,15 +68,50 @@ export async function getDatosReferencia(req, res) {
 
     const timestamp = Date.now();
 
+    // Consultar escritorio actual y sus biométricos
+    const escritoriosParams = [req.empresa_id];
+    let escritoriosQuery = `
+      SELECT 
+        e.id, 
+        e.nombre, 
+        e.dispositivos_biometricos, 
+        e.es_activo,
+        ce.prioridad_biometrico,
+        ce.metodos_autenticacion
+      FROM escritorio e
+      LEFT JOIN configuraciones_escritorio ce ON ce.escritorio_id = e.id
+      WHERE e.empresa_id = $1
+    `;
+    if (escritorio_id) {
+      escritoriosQuery += ` AND e.id = $2`;
+      escritoriosParams.push(escritorio_id);
+    }
+    const escritorios = await pool.query(escritoriosQuery, escritoriosParams);
+
+    const bioParams = [req.empresa_id];
+    let bioQuery = `
+      SELECT b.id, b.nombre, b.tipo, b.device_id, b.estado, b.es_activo, b.escritorio_id
+      FROM biometrico b
+      INNER JOIN escritorio e ON e.id = b.escritorio_id
+      WHERE e.empresa_id = $1 AND b.es_activo = true
+    `;
+    if (escritorio_id) {
+      bioQuery += ` AND b.escritorio_id = $2`;
+      bioParams.push(escritorio_id);
+    }
+    const biometricos = await pool.query(bioQuery, bioParams);
+
     // Responder solo con los datos necesarios para el Kiosco offline
     res.json({
       empleados: empleados.rows,
       horarios: horarios.rows,
       credenciales: credenciales.rows,
+      escritorios: escritorios.rows,
+      biometricos: biometricos.rows,
       timestamp
     });
 
-    console.log(`[Sync] ✅ Datos de referencia enviados: ${empleados.rows.length} empleados, ${horarios.rows.length} horarios, ${credenciales.rows.length} credenciales`);
+    console.log(`[Sync] ✅ Datos de referencia enviados: ${empleados.rows.length} empleados, ${horarios.rows.length} horarios, ${credenciales.rows.length} credenciales, ${escritorios.rows.length} escritorios, ${biometricos.rows.length} biométricos`);
 
   } catch (error) {
     console.error('[Sync] ❌ Error obteniendo datos de referencia:', error);

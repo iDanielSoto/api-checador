@@ -6,16 +6,37 @@ import { pool } from '../config/db.js';
  */
 export async function getConfiguracion(req, res) {
     try {
-        const resultado = await pool.query(`
-            SELECT
-                c.*,
-                e.id as empresa_id,
-                e.nombre as empresa_nombre,
-                e.logo as empresa_logo
-            FROM configuraciones c
-            LEFT JOIN empresas e ON e.configuracion_id = c.id
-            LIMIT 1
-        `);
+        // Multi-tenant: buscar la configuración de la empresa del usuario autenticado
+        const empresaId = req.empresa_id || req.usuario?.empresa_id;
+        let resultado;
+
+        if (empresaId && empresaId !== 'MASTER') {
+            resultado = await pool.query(`
+                SELECT
+                    c.*,
+                    e.id as empresa_id,
+                    e.nombre as empresa_nombre,
+                    e.logo as empresa_logo
+                FROM configuraciones c
+                INNER JOIN empresas e ON e.configuracion_id = c.id
+                WHERE e.id = $1
+                ORDER BY c.id DESC
+                LIMIT 1
+            `, [empresaId]);
+        } else {
+            // Fallback para SaaS admin sin empresa específica
+            resultado = await pool.query(`
+                SELECT
+                    c.*,
+                    e.id as empresa_id,
+                    e.nombre as empresa_nombre,
+                    e.logo as empresa_logo
+                FROM configuraciones c
+                LEFT JOIN empresas e ON e.configuracion_id = c.id
+                ORDER BY c.id DESC
+                LIMIT 1
+            `);
+        }
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
@@ -25,14 +46,17 @@ export async function getConfiguracion(req, res) {
         }
 
         const configData = resultado.rows[0];
+        console.log('[API Backend] empresa_id:', empresaId, '| orden_credenciales raw:', configData.orden_credenciales);
 
-        // Asegurar que orden_credenciales tiene un valor predeterminado si es null
+        // Parsear orden_credenciales si viene como string, o aplicar fallback si es null
         if (!configData.orden_credenciales) {
-            configData.orden_credenciales = {
-                pin: { activo: true, prioridad: 1 },
-                dactilar: { activo: true, prioridad: 2 },
-                facial: { activo: true, prioridad: 3 }
-            };
+            configData.orden_credenciales = [
+                { metodo: 'pin', activo: true, nivel: 1 },
+                { metodo: 'dactilar', activo: true, nivel: 2 },
+                { metodo: 'facial', activo: true, nivel: 3 }
+            ];
+        } else if (typeof configData.orden_credenciales === 'string') {
+            try { configData.orden_credenciales = JSON.parse(configData.orden_credenciales); } catch (e) { }
         }
 
         res.json({
@@ -59,6 +83,7 @@ export async function getConfiguracionById(req, res) {
 
         const resultado = await pool.query(`
             SELECT * FROM configuraciones WHERE id = $1
+            ORDER BY id DESC
         `, [id]);
 
         if (resultado.rows.length === 0) {
@@ -70,13 +95,15 @@ export async function getConfiguracionById(req, res) {
 
         const configData = resultado.rows[0];
 
-        // Asegurar que orden_credenciales tiene un valor predeterminado si es null
+        // Asegurar que orden_credenciales es un array con valor predeterminado si es null
         if (!configData.orden_credenciales) {
-            configData.orden_credenciales = {
-                pin: { activo: true, prioridad: 1 },
-                dactilar: { activo: true, prioridad: 2 },
-                facial: { activo: true, prioridad: 3 }
-            };
+            configData.orden_credenciales = [
+                { metodo: 'pin', activo: true, nivel: 1 },
+                { metodo: 'dactilar', activo: true, nivel: 2 },
+                { metodo: 'facial', activo: true, nivel: 3 }
+            ];
+        } else if (typeof configData.orden_credenciales === 'string') {
+            try { configData.orden_credenciales = JSON.parse(configData.orden_credenciales); } catch (e) { }
         }
 
         res.json({
@@ -115,8 +142,26 @@ export async function updateConfiguracion(req, res) {
             requiere_salida
         } = req.body;
 
+        // Si orden_credenciales llega como string ya serializado, parsear primero
+        // para evitar doble-serialización ("\"[...]\"" en vez de [...])
+        let ordenNorm = orden_credenciales;
+        if (typeof ordenNorm === 'string') {
+            try { ordenNorm = JSON.parse(ordenNorm); } catch (e) { ordenNorm = null; }
+        }
+        // Asegurar que guardamos objetos {metodo, activo, nivel}
+        if (Array.isArray(ordenNorm)) {
+            ordenNorm = ordenNorm.map((item, index) => {
+                if (typeof item === 'string') {
+                    const met = item === 'huella' ? 'dactilar' : item;
+                    return { metodo: met, activo: true, nivel: index + 1 };
+                }
+                const met = item?.metodo === 'huella' ? 'dactilar' : (item?.metodo || '');
+                return { ...item, metodo: met, nivel: item.nivel || index + 1 };
+            });
+        }
+
         const paletaJson = paleta_colores ? JSON.stringify(paleta_colores) : null;
-        const ordenJson = orden_credenciales ? JSON.stringify(orden_credenciales) : null;
+        const ordenJson = ordenNorm ? JSON.stringify(ordenNorm) : null;
         const segmentosJson = segmentos_red ? JSON.stringify(segmentos_red) : null;
 
         const resultado = await pool.query(`
@@ -242,5 +287,3 @@ export async function getMantenimientoStatus(req, res) {
         });
     }
 }
-
-

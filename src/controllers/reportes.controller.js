@@ -455,6 +455,16 @@ export async function getReporteChecadasQuincena(req, res) {
             ORDER BY fecha_registro ASC
         `, [empleado_id, fecha_inicio, fecha_fin]);
 
+        // Incidencias del período
+        const incRes = await pool.query(`
+            SELECT tipo, fecha_inicio, fecha_fin
+            FROM incidencias
+            WHERE empleado_id = $1
+              AND estado = 'aprobado'
+              AND (fecha_inicio <= $3 AND fecha_fin >= $2)
+        `, [empleado_id, fecha_inicio, fecha_fin]);
+        const incidenciasAprobadas = incRes.rows;
+
         // Agrupar asistencias por fecha
         const porFecha = {};
         for (const reg of asistRes.rows) {
@@ -488,7 +498,19 @@ export async function getReporteChecadasQuincena(req, res) {
                 }));
             }
 
-            const aplica = turnosDia.length > 0;
+            let aplica = turnosDia.length > 0;
+            let incidenciaDia = null;
+
+            // Verificar si el día cae dentro de una incidencia aprobada
+            const incEncontrada = incidenciasAprobadas.find(inc => 
+                fechaStr >= inc.fecha_inicio.toISOString().split('T')[0] && 
+                fechaStr <= inc.fecha_fin.toISOString().split('T')[0]
+            );
+
+            if (incEncontrada) {
+                aplica = false; // Anulamos asistencia
+                incidenciaDia = incEncontrada.tipo.replace(/_/g, ' ').toUpperCase();
+            }
 
             // Parear entradas/salidas por turno
             const turnos = [];
@@ -544,6 +566,7 @@ export async function getReporteChecadasQuincena(req, res) {
                 fecha: fechaStr,
                 dia_semana: diaSemana,
                 aplica,
+                incidencia: incidenciaDia,
                 turnos: aplica ? turnos : []
             });
         }
@@ -577,5 +600,112 @@ export async function getReporteChecadasQuincena(req, res) {
     } catch (error) {
         console.error('Error en getReporteChecadasQuincena:', error);
         res.status(500).json({ success: false, message: 'Error al generar reporte de quincena' });
+    }
+}
+
+/* ============================================================
+   REPORTE DE INCIDENCIAS DETALLADO (RRHH)
+   GET /api/reportes/incidencias/rrhh
+   Query params: empleado_id, fecha_inicio, fecha_fin
+============================================================ */
+export async function getReporteIncidenciasRRHH(req, res) {
+    try {
+        const { empleado_id, fecha_inicio, fecha_fin } = req.query;
+
+        if (!empleado_id || !fecha_inicio || !fecha_fin) {
+            return res.status(400).json({
+                success: false,
+                message: 'Se requieren empleado_id, fecha_inicio y fecha_fin'
+            });
+        }
+
+        // 1. Obtener datos del empleado y su empresa (para logos/config)
+        const empRes = await pool.query(`
+            SELECT 
+                e.id, u.nombre, e.rfc, e.regimen_laboral,
+                emp.nombre as empresa_nombre,
+                emp.configuracion_reportes
+            FROM empleados e
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            INNER JOIN empresas emp ON emp.id = u.empresa_id
+            WHERE e.id = $1 AND u.empresa_id = $2
+        `, [empleado_id, req.empresa_id]);
+
+        if (empRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+        }
+
+        const empleado = empRes.rows[0];
+
+        // 2. Obtener incidencias (asistencias con estado != 'puntual')
+        const asistRes = await pool.query(`
+            SELECT 
+                id, 
+                estado, 
+                fecha_registro, 
+                horario_snapshot,
+                tipo
+            FROM asistencias
+            WHERE empleado_id = $1
+              AND fecha_registro::date BETWEEN $2 AND $3
+              AND estado NOT IN ('puntual', 'fin_bloque')
+              AND tipo = 'entrada'
+            ORDER BY fecha_registro ASC
+        `, [empleado_id, fecha_inicio, fecha_fin]);
+
+        // 3. Procesar las incidencias para el formato solicitado
+        const incidencias = asistRes.rows.map(reg => {
+            const fecha = new Date(reg.fecha_registro);
+            const snapshot = reg.horario_snapshot
+                ? (typeof reg.horario_snapshot === 'string' ? JSON.parse(reg.horario_snapshot) : reg.horario_snapshot)
+                : null;
+
+            return {
+                id: reg.id,
+                fecha: reg.fecha_registro.toISOString().split('T')[0],
+                mes: fecha.toLocaleString('es-ES', { month: 'long' }).toUpperCase(),
+                hora: `${String(fecha.getHours()).padStart(2, '0')}:${String(fecha.getMinutes()).padStart(2, '0')}`,
+                turno: snapshot?.turno_index ? `Turno ${snapshot.turno_index + 1}` : 'N/A',
+                tipo: reg.estado.replace(/_/g, ' ').toUpperCase(),
+                estado_raw: reg.estado
+            };
+        });
+
+        // 4. Calcular resumen de conteos
+        const resumen = {
+            total_faltas: asistRes.rows.filter(r => ['falta', 'falta_por_retardo'].includes(r.estado)).length,
+            total_retardos_a: asistRes.rows.filter(r => r.estado === 'retardo_a').length,
+            total_retardos_b: asistRes.rows.filter(r => r.estado === 'retardo_b').length,
+            total_retardos: asistRes.rows.filter(r => r.estado === 'retardo').length
+        };
+
+        // Construir el string de "Total de Incidencias"
+        const partesResumen = [];
+        if (resumen.total_faltas > 0) partesResumen.push(`${resumen.total_faltas} ${resumen.total_faltas === 1 ? 'Falta' : 'Faltas'}`);
+        if (resumen.total_retardos_a > 0) partesResumen.push(`${resumen.total_retardos_a} Retardo A`);
+        if (resumen.total_retardos_b > 0) partesResumen.push(`${resumen.total_retardos_b} Retardo B`);
+        if (resumen.total_retardos > 0) partesResumen.push(`${resumen.total_retardos} Retardo`);
+
+        const resumenTexto = partesResumen.join(', ') || 'Sin incidencias';
+
+        res.json({
+            success: true,
+            data: {
+                empleado: {
+                    id: empleado.id,
+                    nombre: empleado.nombre,
+                    rfc: empleado.rfc,
+                    tipo_trabajador: empleado.regimen_laboral || 'GENERAL'
+                },
+                periodo: { inicio: fecha_inicio, fin: fecha_fin },
+                incidencias,
+                resumen_texto: resumenTexto,
+                resumen_detallado: resumen
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en getReporteIncidenciasRRHH:', error);
+        res.status(500).json({ success: false, message: 'Error al generar reporte de incidencias' });
     }
 }
