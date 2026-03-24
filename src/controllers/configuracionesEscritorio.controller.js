@@ -26,10 +26,9 @@ export async function getConfiguracionEscritorio(req, res) {
                 INSERT INTO configuraciones_escritorio (
                     id, configuracion_id, escritorio_id, sincronizacion_automatica, 
                     frecuencia_sincronizacion_min, modo_offline_permitido,
-                    iniciar_con_windows, forzar_pantalla_completa, bloquear_cierre_app,
-                    pin_administrador, metodos_autenticacion, prioridad_biometrico
+                    iniciar_con_windows, metodos_autenticacion, prioridad_biometrico
                 ) VALUES (
-                    $1, $2, $3, true, 15, true, false, false, false, '', 
+                    $1, $2, $3, true, 15, true, false, 
                     '{"huella": true, "rostro": true, "codigo": true}'::jsonb,
                     '[{"metodo":"huella","activo":true,"nivel":1},{"metodo":"rostro","activo":true,"nivel":2},{"metodo":"codigo","activo":true,"nivel":3}]'::jsonb
                 ) RETURNING *
@@ -58,9 +57,6 @@ export async function updateConfiguracionEscritorio(req, res) {
             frecuencia_sincronizacion_min,
             modo_offline_permitido,
             iniciar_con_windows,
-            forzar_pantalla_completa,
-            bloquear_cierre_app,
-            pin_administrador,
             metodos_autenticacion,
             prioridad_biometrico,
             es_activo,
@@ -76,20 +72,16 @@ export async function updateConfiguracionEscritorio(req, res) {
                 frecuencia_sincronizacion_min = COALESCE($2, frecuencia_sincronizacion_min),
                 modo_offline_permitido = COALESCE($3, modo_offline_permitido),
                 iniciar_con_windows = COALESCE($4, iniciar_con_windows),
-                forzar_pantalla_completa = COALESCE($5, forzar_pantalla_completa),
-                bloquear_cierre_app = COALESCE($6, bloquear_cierre_app),
-                pin_administrador = COALESCE($7, pin_administrador),
-                metodos_autenticacion = COALESCE($8, metodos_autenticacion),
-                es_activo = COALESCE($9, es_activo),
-                prioridad_biometrico = COALESCE($11, prioridad_biometrico),
-                es_mantenimiento = COALESCE($12, es_mantenimiento),
+                metodos_autenticacion = COALESCE($5, metodos_autenticacion),
+                es_activo = COALESCE($6, es_activo),
+                prioridad_biometrico = COALESCE($8, prioridad_biometrico),
+                es_mantenimiento = COALESCE($9, es_mantenimiento),
                 actualizado_en = CURRENT_TIMESTAMP
-            WHERE escritorio_id = $10
+            WHERE escritorio_id = $7
             RETURNING *
         `, [
             sincronizacion_automatica, frecuencia_sincronizacion_min, modo_offline_permitido,
-            iniciar_con_windows, forzar_pantalla_completa, bloquear_cierre_app,
-            pin_administrador, metodosJson, es_activo, escritorio_id, prioridadJson, es_mantenimiento
+            iniciar_con_windows, metodosJson, es_activo, escritorio_id, prioridadJson, es_mantenimiento
         ]);
 
         if (result.rows.length === 0) {

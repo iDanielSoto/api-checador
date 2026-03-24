@@ -3,6 +3,8 @@ import { pool } from '../config/db.js';
 import { generateId, generateSecurityKey, ID_PREFIXES } from '../utils/idGenerator.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 import { broadcast } from '../utils/sse.js';
+import { validarCorreoReal } from '../utils/emailValidator.js';
+import { enviarCorreoNuevoAdmin } from '../utils/mailer.js';
 
 /**
  * GET /api/usuarios
@@ -205,6 +207,14 @@ export async function createUsuario(req, res) {
             });
         }
 
+        const correoValido = await validarCorreoReal(correo);
+        if (!correoValido) {
+            return res.status(400).json({
+                success: false,
+                message: 'El correo electrónico no es válido o su dominio no existe'
+            });
+        }
+
         // Verificar unicidad dentro de la misma empresa
         const existe = await client.query(
             'SELECT id FROM usuarios WHERE (usuario = $1 OR correo = $2) AND empresa_id = $3',
@@ -312,6 +322,12 @@ export async function createUsuario(req, res) {
         rolesFinales = [...new Set(rolesFinales)];
 
         // Asignar roles
+        let tieneRolAdmin = false;
+        if (rolesFinales.length > 0) {
+            const adminCheck = await client.query('SELECT es_admin FROM roles WHERE id = ANY($1)', [rolesFinales]);
+            tieneRolAdmin = adminCheck.rows.some(r => r.es_admin);
+        }
+
         for (const rol_id of rolesFinales) {
             const urlId = await generateId(ID_PREFIXES.USUARIO_ROL);
             await client.query(`
@@ -321,6 +337,19 @@ export async function createUsuario(req, res) {
         }
 
         await client.query('COMMIT');
+
+        if (tieneRolAdmin) {
+            let empNombre = 'tu empresa';
+            let empIdentificador = null;
+            if (empresa_id) {
+                const empRes = await pool.query('SELECT nombre, identificador FROM empresas WHERE id = $1', [empresa_id]);
+                if (empRes.rows.length > 0) {
+                    empNombre = empRes.rows[0].nombre;
+                    empIdentificador = empRes.rows[0].identificador;
+                }
+            }
+            enviarCorreoNuevoAdmin(nombre, correo, empNombre, empIdentificador).catch(e => console.error("Error envío Nodemailer:", e));
+        }
 
         // Registrar evento
         await registrarEvento({
@@ -386,7 +415,7 @@ export async function updateUsuario(req, res) {
 
         // Verificar que existe
         const existe = await client.query(
-            'SELECT id, es_empleado FROM usuarios WHERE id = $1',
+            'SELECT id, es_empleado, correo, nombre, empresa_id FROM usuarios WHERE id = $1',
             [id]
         );
         if (existe.rows.length === 0) {
@@ -413,7 +442,25 @@ export async function updateUsuario(req, res) {
             }
         }
 
+        if (correo && correo !== existe.rows[0].correo) {
+            const correoValido = await validarCorreoReal(correo);
+            if (!correoValido) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'El correo electrónico no es válido o su dominio no existe'
+                });
+            }
+        }
+
         await client.query('BEGIN');
+
+        const rolesViejos = await client.query(`
+            SELECT r.es_admin FROM roles r
+            INNER JOIN usuarios_roles ur ON ur.rol_id = r.id
+            WHERE ur.usuario_id = $1 AND ur.es_activo = true
+        `, [id]);
+        const eraAdmin = rolesViejos.rows.some(r => r.es_admin);
+        let esNuevoAdmin = false;
 
         // Actualizar usuario
         // Para foto: cadena vacía = eliminar foto, null/undefined = mantener, valor = actualizar
@@ -541,6 +588,12 @@ export async function updateUsuario(req, res) {
             // Eliminar duplicados
             rolesFinales = [...new Set(rolesFinales)];
 
+            if (rolesFinales.length > 0) {
+                const adminCheck = await client.query('SELECT es_admin FROM roles WHERE id = ANY($1)', [rolesFinales]);
+                const ahoraEsAdmin = adminCheck.rows.some(r => r.es_admin);
+                esNuevoAdmin = !eraAdmin && ahoraEsAdmin;
+            }
+
             // Desactivar todos los roles actuales
             await client.query(
                 'UPDATE usuarios_roles SET es_activo = false WHERE usuario_id = $1',
@@ -605,6 +658,22 @@ export async function updateUsuario(req, res) {
         }
 
         await client.query('COMMIT');
+
+        if (esNuevoAdmin) {
+            const correoDest = correo || existe.rows[0].correo;
+            const msjNombre = nombre || existe.rows[0].nombre;
+            let empNombre = 'tu empresa';
+            let empIdentificador = null;
+            const compEmpresaId = empresa_id || existe.rows[0].empresa_id;
+            if (compEmpresaId) {
+                const empRes = await pool.query('SELECT nombre, identificador FROM empresas WHERE id = $1', [compEmpresaId]);
+                if (empRes.rows.length > 0) {
+                    empNombre = empRes.rows[0].nombre;
+                    empIdentificador = empRes.rows[0].identificador;
+                }
+            }
+            enviarCorreoNuevoAdmin(msjNombre, correoDest, empNombre, empIdentificador).catch(e => console.error("Error envío Nodemailer:", e));
+        }
 
         // Registrar evento
         await registrarEvento({
@@ -784,11 +853,26 @@ export async function asignarRol(req, res) {
             });
         }
 
+        const checkRolUser = await pool.query(`
+            SELECT r.es_admin, u.correo, u.nombre, u.empresa_id,
+              (SELECT nombre FROM empresas WHERE id = u.empresa_id) as empresa_nombre,
+              (SELECT identificador FROM empresas WHERE id = u.empresa_id) as empresa_identificador
+            FROM roles r, usuarios u
+            WHERE r.id = $1 AND u.id = $2
+        `, [rol_id, id]);
+
+        if (checkRolUser.rows.length === 0) {
+             return res.status(404).json({ success: false, message: 'Usuario o rol no encontrado' });
+        }
+        const usuarioData = checkRolUser.rows[0];
+
         // Verificar si ya tiene el rol
         const existe = await pool.query(
-            'SELECT id FROM usuarios_roles WHERE usuario_id = $1 AND rol_id = $2',
+            'SELECT id, es_activo FROM usuarios_roles WHERE usuario_id = $1 AND rol_id = $2',
             [id, rol_id]
         );
+
+        const yaLoTeniaActivo = existe.rows.length > 0 && existe.rows[0].es_activo;
 
         if (existe.rows.length > 0) {
             // Reactivar si estaba inactivo
@@ -802,6 +886,10 @@ export async function asignarRol(req, res) {
                 INSERT INTO usuarios_roles (id, usuario_id, rol_id, es_activo)
                 VALUES ($1, $2, $3, true)
             `, [urlId, id, rol_id]);
+        }
+
+        if (usuarioData.es_admin && !yaLoTeniaActivo) {
+            enviarCorreoNuevoAdmin(usuarioData.nombre, usuarioData.correo, usuarioData.empresa_nombre, usuarioData.empresa_identificador).catch(e => console.error("Error envío Nodemailer:", e));
         }
 
         // Registrar evento

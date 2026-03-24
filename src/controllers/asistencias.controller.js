@@ -172,10 +172,12 @@ async function registrarAsistenciaMovil(req, res) {
             });
         }
 
-        // 6 & 7. Validar dentro de zona GPS y red 
-        // (Nota: ubicacion vendría en formato array o parecido. Se pasa junto con tolerancia.segmentos_red)
+        // 6 & 7. Validar dentro de zona GPS y red
+        // IMPORTANTE: usar req.body.ip (IP local LAN del dispositivo, enviada por el móvil)
+        // y NO req.ip (que es la IP pública WAN del servidor, inútil para validar segmentos LAN).
         try {
-            srvValidarZonaYRed(ubicacion, null, req.ip, tolerancia.segmentos_red);
+            const ipDispositivo = req.body.ip || null;
+            srvValidarZonaYRed(ubicacion, null, ipDispositivo, tolerancia.segmentos_red);
         } catch (e) {
             return res.status(403).json({ success: false, message: e.message });
         }

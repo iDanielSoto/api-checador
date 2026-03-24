@@ -18,6 +18,7 @@ export async function getEmpresas(req, res) {
                 e.logo,
                 e.telefono,
                 e.correo,
+                e.tipo_institucion,
                 e.es_activo,
                 e.fecha_registro,
                 e.configuracion_id,
@@ -63,7 +64,7 @@ export async function getMiEmpresa(req, res) {
     try {
         const resultado = await pool.query(`
             SELECT
-                e.id, e.nombre, e.identificador, e.logo, e.telefono, e.correo, e.es_activo, e.fecha_registro,
+                e.id, e.nombre, e.identificador, e.logo, e.telefono, e.correo, e.tipo_institucion, e.es_activo, e.fecha_registro,
                 e.configuracion_id, e.configuracion_reportes,
                 c.idioma, c.zona_horaria, c.formato_fecha, c.formato_hora, c.segmentos_red, c.requiere_salida,
                 c.intervalo_bloques_minutos, c.es_mantenimiento,
@@ -104,10 +105,11 @@ export async function updateMiEmpresa(req, res) {
                 logo = $2,
                 telefono = $3,
                 correo = $4,
-                configuracion_reportes = COALESCE($5::jsonb, configuracion_reportes)
-            WHERE id = $6
+                tipo_institucion = COALESCE($5, tipo_institucion),
+                configuracion_reportes = COALESCE($6::jsonb, configuracion_reportes)
+            WHERE id = $7
             RETURNING *
-        `, [nombre.trim(), logo || null, telefono || null, correo || null, configuracion_reportes ? JSON.stringify(configuracion_reportes) : null, req.empresa_id]);
+        `, [nombre.trim(), logo || null, telefono || null, correo || null, req.body.tipo_institucion || null, configuracion_reportes ? JSON.stringify(configuracion_reportes) : null, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Empresa no encontrada' });
@@ -179,6 +181,7 @@ export async function createEmpresa(req, res) {
             logo,
             telefono,
             correo,
+            tipo_institucion,
             admin_usuario, // Creado especialmente para el SaaS frontend
             admin_correo,
             departamento_nombre,
@@ -220,13 +223,13 @@ export async function createEmpresa(req, res) {
 
         const resultadoEmpresa = await client.query(`
             INSERT INTO empresas (
-                id, nombre, logo, telefono, correo, es_activo, configuracion_id, 
+                id, nombre, logo, telefono, correo, tipo_institucion, es_activo, configuracion_id, 
                 limite_empleados, limite_dispositivos, fecha_vencimiento, identificador
             )
-            VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9, $10, $11)
             RETURNING *
         `, [
-            empresaId, nombre, logo, telefono, correo, configId,
+            empresaId, nombre, logo, telefono, correo, tipo_institucion || 'corporativa', configId,
             limite_empleados, limite_dispositivos, fecha_vencimiento, identificador
         ]);
 
@@ -323,7 +326,7 @@ export async function updateEmpresa(req, res) {
     try {
         const { id } = req.params;
         const {
-            nombre, logo, es_activo, telefono, correo,
+            nombre, logo, es_activo, telefono, correo, tipo_institucion,
             limite_empleados, limite_dispositivos, fecha_vencimiento
         } = req.body;
 
@@ -334,12 +337,13 @@ export async function updateEmpresa(req, res) {
                 es_activo= COALESCE($3, es_activo),
                 telefono = COALESCE($4, telefono),
                 correo   = COALESCE($5, correo),
-                limite_empleados = CASE WHEN $6::text = 'null' THEN NULL ELSE COALESCE($6::integer, limite_empleados) END,
-                limite_dispositivos = CASE WHEN $7::text = 'null' THEN NULL ELSE COALESCE($7::integer, limite_dispositivos) END,
-                fecha_vencimiento = CASE WHEN $8::text = 'null' THEN NULL ELSE COALESCE($8::timestamp, fecha_vencimiento) END
-            WHERE id = $9
+                tipo_institucion = COALESCE($6, tipo_institucion),
+                limite_empleados = CASE WHEN $7::text = 'null' THEN NULL ELSE COALESCE($7::integer, limite_empleados) END,
+                limite_dispositivos = CASE WHEN $8::text = 'null' THEN NULL ELSE COALESCE($8::integer, limite_dispositivos) END,
+                fecha_vencimiento = CASE WHEN $9::text = 'null' THEN NULL ELSE COALESCE($9::timestamp, fecha_vencimiento) END
+            WHERE id = $10
             RETURNING *
-        `, [nombre, logo, es_activo, telefono, correo, limite_empleados, limite_dispositivos, fecha_vencimiento, id]);
+        `, [nombre, logo, es_activo, telefono, correo, tipo_institucion, limite_empleados, limite_dispositivos, fecha_vencimiento, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

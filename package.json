@@ -9,6 +9,7 @@
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-cpu": "^4.22.0",
+    "@tensorflow/tfjs-node": "npm:@tensorflow/tfjs@^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
     "bcrypt": "^6.0.0",
     "canvas": "^3.2.1",
@@ -19,6 +20,7 @@
     "jsonwebtoken": "^9.0.3",
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
+    "nodemailer": "^8.0.3",
     "pg": "^8.16.3",
     "winston": "^3.19.0",
     "zod": "^4.3.6"

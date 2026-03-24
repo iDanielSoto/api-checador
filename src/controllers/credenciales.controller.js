@@ -179,14 +179,27 @@ export async function eliminarCredencial(req, res) {
 
 export async function getCredencialesPublico(req, res) {
     try {
+        const { empresa_id } = req.query;
+
+        if (!empresa_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'El parámetro empresa_id es requerido para listar credenciales.'
+            });
+        }
+
         const resultado = await pool.query(`
             SELECT c.id, c.empleado_id,
                 CASE WHEN c.dactilar IS NOT NULL THEN true ELSE false END as tiene_dactilar,
+                encode(c.dactilar, 'base64') as dactilar,
                 CASE WHEN c.facial IS NOT NULL THEN true ELSE false END as tiene_facial,
                 CASE WHEN c.pin IS NOT NULL THEN true ELSE false END as tiene_pin
             FROM credenciales c
-            WHERE c.dactilar IS NOT NULL
-        `);
+            INNER JOIN empleados e ON e.id = c.empleado_id
+            INNER JOIN usuarios u ON u.id = e.usuario_id
+            WHERE c.dactilar IS NOT NULL AND u.empresa_id = $1
+        `, [empresa_id]);
+
         res.json({ success: true, data: resultado.rows });
     } catch (error) {
         console.error('Error en getCredencialesPublico:', error);
@@ -459,5 +472,3 @@ export async function loginPorPin(req, res) {
         res.status(500).json({ success: false, message: 'Error al iniciar sesión con PIN' });
     }
 }
-
-// QUE ALV  apaga bd puta maaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaadre

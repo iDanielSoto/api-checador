@@ -474,16 +474,17 @@ export async function aceptarSolicitud(req, res) {
             // Crear registros biométricos nuevos
             for (const dispositivo of biometricos_ids) {
                 await client.query(`
-                    INSERT INTO biometrico (id, nombre, descripcion, tipo, ip, puerto, estado, es_activo, escritorio_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, 'desconectado', true, $7)
+                    INSERT INTO biometrico (id, nombre, descripcion, tipo, ip, puerto, estado, es_activo, escritorio_id, device_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, 'desconectado', true, $7, $8)
                 `, [
                     dispositivo.id,
-                    dispositivo.nombre,
+                    dispositivo.nombre || dispositivo.name,
                     dispositivo.descripcion || null,
-                    dispositivo.tipo,
+                    dispositivo.tipo || dispositivo.type,
                     dispositivo.ip || null,
                     dispositivo.puerto || null,
-                    dispositivo_id
+                    dispositivo_id,
+                    dispositivo.device_id || null
                 ]);
             }
 
