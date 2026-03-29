@@ -327,25 +327,12 @@ export const sincronizarAsistencias = async (req, res) => {
                 // Generar ID
                 const servidor_id = await generateId(ID_PREFIXES.ASISTENCIA);
 
-                // --- Validar segmentos de red para esta asistencia ---
+                // --- Validar segmentos de red para esta asistencia (Usando objeto heredado) ---
                 let alertasReg = [];
-                try {
-                    const empEmpresa = await pool.query(`
-                        SELECT e.id as empresa_id, c.segmentos_red
-                        FROM empleados emp
-                        INNER JOIN usuarios u ON emp.usuario_id = u.id
-                        INNER JOIN empresas e ON e.id = u.empresa_id
-                        INNER JOIN configuraciones c ON c.id = e.configuracion_id
-                        WHERE emp.id = $1
-                    `, [reg.empleado_id]);
-
-                    if (empEmpresa.rows.length > 0) {
-                        let segmentosRed = empEmpresa.rows[0].segmentos_red;
-                        if (typeof segmentosRed === 'string') {
-                            try { segmentosRed = JSON.parse(segmentosRed); } catch { segmentosRed = []; }
-                        }
-                        segmentosRed = segmentosRed || [];
-
+                if (tolerancia && tolerancia.segmentos_red) {
+                    try {
+                        let segmentosRed = tolerancia.segmentos_red;
+                        
                         let coordenadas = null;
                         if (reg.ubicacion && Array.isArray(reg.ubicacion) && reg.ubicacion.length >= 2) {
                             coordenadas = { lat: reg.ubicacion[0], lng: reg.ubicacion[1] };
@@ -377,9 +364,9 @@ export const sincronizarAsistencias = async (req, res) => {
                         if (alertasReg.length > 0) {
                             console.warn(`⚠️ [movilSync] Alertas de red/gps para ${reg.empleado_id}:`, alertasReg.map(a => a.tipo).join(', '));
                         }
+                    } catch (netErr) {
+                        console.error('[movilSync] Error al validar red/gps:', netErr.message);
                     }
-                } catch (netErr) {
-                    console.error('[movilSync] Error al validar red/gps:', netErr.message);
                 }
 
                 // RECHAZO ESTRICTO DE PERÍMETRO
@@ -396,8 +383,8 @@ export const sincronizarAsistencias = async (req, res) => {
                 await pool.query(`
                     INSERT INTO asistencias
                     (id, empleado_id, tipo, estado, departamento_id,
-                     dispositivo_origen, fecha_registro, ubicacion, alertas, horario_snapshot)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                     dispositivo_origen, fecha_registro, ubicacion, alertas, horario_snapshot, empresa_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 `, [
                     servidor_id,
                     reg.empleado_id,
@@ -408,7 +395,8 @@ export const sincronizarAsistencias = async (req, res) => {
                     fecha,
                     reg.ubicacion || null,
                     JSON.stringify(alertasReg),
-                    horarioSnapshot
+                    horarioSnapshot,
+                    empCheck.rows[0].empresa_id
                 ]);
 
                 sincronizados.push({

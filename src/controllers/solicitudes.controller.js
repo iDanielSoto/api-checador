@@ -371,7 +371,7 @@ export async function createSolicitud(req, res) {
         res.status(201).json({
             success: true,
             message: 'Solicitud creada/actualizada correctamente. Espere aprobación.',
-            data: { id, token, estado: 'pendiente' }
+            data: { id, token, estado: 'pendiente', empresa_id: empresaIdFinal }
         });
 
     } catch (error) {
@@ -416,11 +416,6 @@ export async function aceptarSolicitud(req, res) {
         if (sol.tipo === 'escritorio') {
             const dispositivos_temp = sol.dispositivos_temp || [];
 
-            for (const dispositivo of dispositivos_temp) {
-                const biometrico_id = await generateId(ID_PREFIXES.BIOMETRICO);
-                biometricos_ids.push({ id: biometrico_id, ...dispositivo });
-            }
-
             // Buscar si ya existe un escritorio con esta MAC
             const escritorioExistente = await client.query(
                 "SELECT id FROM escritorio WHERE mac = $1 LIMIT 1",
@@ -428,67 +423,89 @@ export async function aceptarSolicitud(req, res) {
             );
 
             if (escritorioExistente.rows.length > 0) {
-                // Reactivar el escritorio existente
                 dispositivo_id = escritorioExistente.rows[0].id;
-
-                // Desactivar biométricos pasados para no tener duplicados
+                // Marcamos todos como inactivos temporalmente para luego reactivar solo los que vengan en la solicitud
                 await client.query(`UPDATE biometrico SET es_activo = false WHERE escritorio_id = $1`, [dispositivo_id]);
-
-                await client.query(`
-                    UPDATE escritorio SET 
-                        nombre = $2,
-                        descripcion = $3,
-                        ip = $4,
-                        sistema_operativo = $5,
-                        dispositivos_biometricos = $6,
-                        empresa_id = $7,
-                        es_activo = true
-                    WHERE id = $1
-                `, [
-                    dispositivo_id,
-                    sol.nombre,
-                    sol.descripcion,
-                    sol.ip,
-                    sol.sistema_operativo,
-                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null,
-                    sol.empresa_id
-                ]);
             } else {
-                // Crear el escritorio nuevo
                 dispositivo_id = await generateId(ID_PREFIXES.ESCRITORIO);
                 await client.query(`
-                    INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, dispositivos_biometricos, es_activo, empresa_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
-                `, [
-                    dispositivo_id,
-                    sol.nombre,
-                    sol.descripcion,
-                    sol.ip,
-                    sol.mac,
-                    sol.sistema_operativo,
-                    biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids.map(b => b.id)) : null,
-                    sol.empresa_id
-                ]);
+                    INSERT INTO escritorio (id, nombre, descripcion, ip, mac, sistema_operativo, es_activo, empresa_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, true, $7)
+                `, [dispositivo_id, sol.nombre, sol.descripcion, sol.ip, sol.mac, sol.sistema_operativo, sol.empresa_id]);
             }
 
-            // Crear registros biométricos nuevos
-            for (const dispositivo of biometricos_ids) {
-                await client.query(`
-                    INSERT INTO biometrico (id, nombre, descripcion, tipo, ip, puerto, estado, es_activo, escritorio_id, device_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, 'desconectado', true, $7, $8)
-                `, [
-                    dispositivo.id,
-                    dispositivo.nombre || dispositivo.name,
-                    dispositivo.descripcion || null,
-                    dispositivo.tipo || dispositivo.type,
-                    dispositivo.ip || null,
-                    dispositivo.puerto || null,
-                    dispositivo_id,
-                    dispositivo.device_id || null
-                ]);
+            // Procesar cada dispositivo biométrico temporalmente enviado
+            for (const dev of dispositivos_temp) {
+                const device_id = dev.device_id;
+                let biometrico_id;
+
+                // Intentar encontrar si ya existe por device_id en este escritorio
+                const bioExistente = device_id ? await client.query(
+                    "SELECT id FROM biometrico WHERE device_id = $1 AND escritorio_id = $2 LIMIT 1",
+                    [device_id, dispositivo_id]
+                ) : { rows: [] };
+
+                if (bioExistente.rows.length > 0) {
+                    biometrico_id = bioExistente.rows[0].id;
+                    // Reactivar y actualizar
+                    await client.query(`
+                        UPDATE biometrico SET
+                            nombre = $1,
+                            descripcion = $2,
+                            tipo = $3,
+                            ip = $4,
+                            puerto = $5,
+                            estado = 'desconectado',
+                            es_activo = true
+                        WHERE id = $6
+                    `, [
+                        dev.nombre || dev.name,
+                        dev.descripcion || null,
+                        dev.tipo || dev.type,
+                        dev.ip || null,
+                        dev.puerto || null,
+                        biometrico_id
+                    ]);
+                } else {
+                    // Crear nuevo
+                    biometrico_id = await generateId(ID_PREFIXES.BIOMETRICO);
+                    await client.query(`
+                        INSERT INTO biometrico (id, nombre, descripcion, tipo, ip, puerto, estado, es_activo, escritorio_id, device_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, 'desconectado', true, $7, $8)
+                    `, [
+                        biometrico_id,
+                        dev.nombre || dev.name,
+                        dev.descripcion || null,
+                        dev.tipo || dev.type,
+                        dev.ip || null,
+                        dev.puerto || null,
+                        dispositivo_id,
+                        device_id || null
+                    ]);
+                }
+                biometricos_ids.push(biometrico_id);
             }
 
-            biometricos_ids = biometricos_ids.map(b => b.id);
+            // Actualizar el escritorio con los IDs de biométricos activos y otros datos
+            await client.query(`
+                UPDATE escritorio SET 
+                    nombre = $2,
+                    descripcion = $3,
+                    ip = $4,
+                    sistema_operativo = $5,
+                    dispositivos_biometricos = $6,
+                    empresa_id = $7,
+                    es_activo = true
+                WHERE id = $1
+            `, [
+                dispositivo_id,
+                sol.nombre,
+                sol.descripcion,
+                sol.ip,
+                sol.sistema_operativo,
+                biometricos_ids.length > 0 ? JSON.stringify(biometricos_ids) : null,
+                sol.empresa_id
+            ]);
 
         } else if (sol.tipo === 'movil') {
             if (!empleado_id) {
@@ -564,7 +581,7 @@ export async function aceptarSolicitud(req, res) {
             }
         });
 
-        const responseData = { solicitud_id: id, dispositivo_id, tipo: sol.tipo };
+        const responseData = { solicitud_id: id, dispositivo_id, tipo: sol.tipo, empresa_id: sol.empresa_id };
         if (biometricos_ids.length > 0) { responseData.biometricos_ids = biometricos_ids; }
 
         broadcast('solicitud-actualizada', { id, estado: 'aceptado', tipo: sol.tipo });
@@ -657,7 +674,7 @@ export async function verificarSolicitud(req, res) {
         const { token } = req.params;
 
         const resultado = await pool.query(`
-            SELECT id, tipo, estado, fecha_respuesta, observaciones, mac
+            SELECT id, tipo, estado, fecha_respuesta, observaciones, mac, empresa_id
             FROM solicitudes
             WHERE token = $1
         `, [token]);
@@ -675,7 +692,8 @@ export async function verificarSolicitud(req, res) {
             tipo: solicitud.tipo,
             estado: solicitud.estado,
             fecha_respuesta: solicitud.fecha_respuesta,
-            observaciones: solicitud.observaciones
+            observaciones: solicitud.observaciones,
+            empresa_id: solicitud.empresa_id
         };
 
         // Si está aceptada y es tipo escritorio, buscar el escritorio_id por MAC

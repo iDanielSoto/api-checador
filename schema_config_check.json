@@ -1,0 +1,143 @@
+--- Columns in usuarios ---
+2026-03-24 19:57:04 [32minfo[39m: ✅ Conectado a la base de datos PostgreSQL
+[
+  {
+    "column_name": "id",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "usuario",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "correo",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "contraseña",
+    "data_type": "text",
+    "udt_name": "text"
+  },
+  {
+    "column_name": "nombre",
+    "data_type": "text",
+    "udt_name": "text"
+  },
+  {
+    "column_name": "foto",
+    "data_type": "text",
+    "udt_name": "text"
+  },
+  {
+    "column_name": "telefono",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "estado_cuenta",
+    "data_type": "USER-DEFINED",
+    "udt_name": "tipo_estado_cuenta"
+  },
+  {
+    "column_name": "es_empleado",
+    "data_type": "boolean",
+    "udt_name": "bool"
+  },
+  {
+    "column_name": "fecha_registro",
+    "data_type": "timestamp without time zone",
+    "udt_name": "timestamp"
+  },
+  {
+    "column_name": "clave_seguridad",
+    "data_type": "integer",
+    "udt_name": "int4"
+  },
+  {
+    "column_name": "empresa_id",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "intentos_fallidos",
+    "data_type": "integer",
+    "udt_name": "int4"
+  },
+  {
+    "column_name": "bloqueado_hasta",
+    "data_type": "timestamp without time zone",
+    "udt_name": "timestamp"
+  }
+]
+
+--- Columns in configuraciones ---
+[
+  {
+    "column_name": "id",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "idioma",
+    "data_type": "USER-DEFINED",
+    "udt_name": "tipo_idioma"
+  },
+  {
+    "column_name": "es_mantenimiento",
+    "data_type": "boolean",
+    "udt_name": "bool"
+  },
+  {
+    "column_name": "formato_fecha",
+    "data_type": "USER-DEFINED",
+    "udt_name": "tipo_formato_fecha"
+  },
+  {
+    "column_name": "formato_hora",
+    "data_type": "USER-DEFINED",
+    "udt_name": "tipo_formato_hora"
+  },
+  {
+    "column_name": "zona_horaria",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "paleta_colores",
+    "data_type": "json",
+    "udt_name": "json"
+  },
+  {
+    "column_name": "intentos_maximos",
+    "data_type": "integer",
+    "udt_name": "int4"
+  },
+  {
+    "column_name": "orden_credenciales",
+    "data_type": "json",
+    "udt_name": "json"
+  },
+  {
+    "column_name": "segmentos_red",
+    "data_type": "jsonb",
+    "udt_name": "jsonb"
+  },
+  {
+    "column_name": "tolerancia_id",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "intervalo_bloques_minutos",
+    "data_type": "integer",
+    "udt_name": "int4"
+  },
+  {
+    "column_name": "requiere_salida",
+    "data_type": "boolean",
+    "udt_name": "bool"
+  }
+]

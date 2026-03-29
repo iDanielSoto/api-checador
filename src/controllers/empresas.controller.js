@@ -340,10 +340,11 @@ export async function updateEmpresa(req, res) {
                 tipo_institucion = COALESCE($6, tipo_institucion),
                 limite_empleados = CASE WHEN $7::text = 'null' THEN NULL ELSE COALESCE($7::integer, limite_empleados) END,
                 limite_dispositivos = CASE WHEN $8::text = 'null' THEN NULL ELSE COALESCE($8::integer, limite_dispositivos) END,
-                fecha_vencimiento = CASE WHEN $9::text = 'null' THEN NULL ELSE COALESCE($9::timestamp, fecha_vencimiento) END
-            WHERE id = $10
+                fecha_vencimiento = CASE WHEN $9::text = 'null' THEN NULL ELSE COALESCE($9::timestamp, fecha_vencimiento) END,
+                configuracion_reportes = COALESCE($10::jsonb, configuracion_reportes)
+            WHERE id = $11
             RETURNING *
-        `, [nombre, logo, es_activo, telefono, correo, tipo_institucion, limite_empleados, limite_dispositivos, fecha_vencimiento, id]);
+        `, [nombre, logo, es_activo, telefono, correo, tipo_institucion, limite_empleados, limite_dispositivos, fecha_vencimiento, req.body.configuracion_reportes ? JSON.stringify(req.body.configuracion_reportes) : null, id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({

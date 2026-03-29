@@ -337,6 +337,15 @@ export async function deleteAviso(req, res) {
  */
 export async function getAvisosPublicos(req, res) {
     try {
+        const { empresa_id } = req.query;
+
+        if (!empresa_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'El parámetro empresa_id es requerido para listar avisos públicos.'
+            });
+        }
+
         const resultado = await pool.query(`
             SELECT 
                 a.id, 
@@ -346,9 +355,9 @@ export async function getAvisosPublicos(req, res) {
                 u.nombre as remitente_nombre
             FROM avisos a
             LEFT JOIN usuarios u ON u.id = a.creado_por
-            WHERE a.es_global = true 
+            WHERE a.es_global = true AND a.empresa_id = $1
             ORDER BY a.fecha_registro DESC
-        `);
+        `, [empresa_id]);
 
         res.json({
             success: true,

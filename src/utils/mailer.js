@@ -38,63 +38,79 @@ export async function enviarCorreoNuevoAdmin(nombre, correo, empresa_nombre, emp
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
     </style>
 </head>
-<body style="margin:0;padding:0;background-color:#f8fafc;font-family:'Outfit','Segoe UI',Tahoma,Geneva,Verdana,sans-serif;-webkit-font-smoothing:antialiased;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;padding:48px 20px;">
+<body style="margin:0;padding:0;background-color:#ffffff;font-family:'Outfit','Segoe UI',Tahoma,Geneva,Verdana,sans-serif;-webkit-font-smoothing:antialiased;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff;padding:60px 20px;">
         <tr>
             <td align="center">
-                <table width="100%" maxWidth="600" style="max-width:600px;background-color:#ffffff;border-radius:24px;border:1px solid #e2e8f0;box-shadow:0 20px 25px -5px rgba(0,0,0,0.04),0 8px 10px -6px rgba(0,0,0,0.04);overflow:hidden;">
+                <table width="100%" maxWidth="600" style="max-width:600px;background-color:#ffffff;border:1px solid #000000;border-collapse:collapse;">
                     
-                    <!-- TOP DECORATOR -->
+                    <!-- HIGH-PRIORITY HEADER BAR -->
                     <tr>
-                        <td style="height:8px;background-color:#2563eb;"></td>
+                        <td style="height:4px;background-color:#000000;"></td>
                     </tr>
-
-                    <!-- HEADER -->
                     <tr>
-                        <td style="padding:48px 48px 32px;text-align:center;">
-                            <h1 style="margin:0;font-size:24px;font-weight:700;color:#0f172a;letter-spacing:-0.5px;text-transform:uppercase;">FASITLAC</h1>
-                            <div style="height:1px;width:40px;background-color:#e2e8f0;margin:16px auto;"></div>
-                            <p style="margin:0;font-size:14px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:1px;">Acceso Administrativo</p>
+                        <td style="height:12px;background-color:#2563eb;"></td>
+                    </tr>
+                    
+                    <!-- BRANDING -->
+                    <tr>
+                        <td style="padding:40px 40px 20px;text-align:left;border-bottom:1px solid #f1f5f9;">
+                            <h1 style="margin:0;font-size:18px;font-weight:800;color:#000000;letter-spacing:1px;text-transform:uppercase;">FASITLAC</h1>
+                            <p style="margin:4px 0 0;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:2px;">Gestión de Asistencia Profesional</p>
                         </td>
                     </tr>
 
-                    <!-- CONTENT -->
+                    <!-- MAIN MESSAGE -->
                     <tr>
-                        <td style="padding:0 48px 40px;">
-                            <h2 style="margin:0 0 12px;font-size:20px;font-weight:600;color:#1e293b;">Hola, ${nombre}</h2>
-                            <p style="margin:0;font-size:15px;line-height:1.6;color:#475569;">
-                                Has sido designado como <strong>Administrador</strong> para la empresa <span style="color:#0f172a;font-weight:600;">${empresa_nombre || 'FASITLAC'}</span>. A partir de este momento tienes acceso a las herramientas de gestión del sistema.
+                        <td style="padding:40px 40px 30px;">
+                            <p style="margin:0 0 16px;font-size:12px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:1px;">Acceso Administrativo Designado</p>
+                            <h2 style="margin:0 0 20px;font-size:28px;font-weight:700;color:#000000;letter-spacing:-0.5px;line-height:1.1;">Hola, ${nombre}</h2>
+                            <p style="margin:0;font-size:15px;line-height:1.6;color:#334155;">
+                                Se han habilitado sus credenciales de <strong>Administrador</strong> para la instancia <span style="color:#000000;font-weight:700;border-bottom:2px solid #2563eb;">${empresa_nombre || 'FASITLAC'}</span>.
                             </p>
                         </td>
                     </tr>
 
-                    <!-- IDENTIFIER CARD -->
+                    <!-- IDENTIFIER CARD (FLAT) -->
                     <tr>
-                        <td style="padding:0 48px 40px;">
-                            <div style="background-color:#f1f5f9;border-radius:16px;padding:24px;border:1px dashed #cbd5e1;">
-                                <p style="margin:0 0 8px;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;">Llave de empresa</p>
-                                <p style="margin:0;font-size:22px;font-weight:700;color:#0f172a;font-family:monospace;letter-spacing:2px;">${empresa_identificador || 'S/N'}</p>
-                                <p style="margin:12px 0 0;font-size:12px;line-height:1.5;color:#94a3b8;">Utiliza este identificador para vincular nuevos nodos, terminales y configurar dispositivos en la red local.</p>
-                            </div>
+                        <td style="padding:0 40px 40px;">
+                            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;background-color:#f8fafc;">
+                                <tr>
+                                    <td style="padding:24px;">
+                                        <p style="margin:0 0 12px;font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:1px;">Llave de Configuración de Empresa</p>
+                                        <p style="margin:0;font-size:24px;font-weight:700;color:#000000;font-family:monospace;letter-spacing:3px;">${empresa_identificador || 'S/N'}</p>
+                                        <div style="height:1px;width:30px;background-color:#cbd5e1;margin:16px 0;"></div>
+                                        <p style="margin:0;font-size:12px;line-height:1.5;color:#64748b;max-width:400px;">Utilice esta clave para vincular dispositivos, terminales biométricas y configurar nodos en la red local de la empresa.</p>
+                                    </td>
+                                </tr>
+                            </table>
                         </td>
                     </tr>
 
-                    <!-- CAPABILITIES -->
+                    <!-- PERMISSIONS LIST -->
                     <tr>
-                        <td style="padding:0 48px 48px;">
-                            <h3 style="margin:0 0 20px;font-size:14px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.5px;">Capacidades de tu perfil:</h3>
+                        <td style="padding:0 40px 40px;">
+                            <h3 style="margin:0 0 20px;font-size:11px;font-weight:800;color:#000000;text-transform:uppercase;letter-spacing:1.5px;border-bottom:1px solid #000000;display:inline-block;padding-bottom:4px;">Privilegios del Perfil</h3>
                             
                             <table width="100%" cellpadding="0" cellspacing="0">
                                 ${[
-                                    { t: 'Afiliación de Nodos', d: 'Registro y vinculación de terminales físicas mediante el identificador.' },
-                                    { t: 'Control de Dispositivos', d: 'Gestión de accesos móviles y herramientas de sincronización.' },
-                                    { t: 'Gestión de Talento', d: 'Administración de empleados, usuarios y asignación de roles.' },
-                                    { t: 'Inteligencia de Datos', d: 'Acceso a reportes automáticos y exportación de incidencias.' }
+                                    { t: 'AFILIACIÓN', d: 'Gestión de nodos y terminales físicas.' },
+                                    { t: 'DISPOSITIVOS', d: 'Control de accesos móviles y sincronización.' },
+                                    { t: 'TALENTO', d: 'Administración de personal y roles.' },
+                                    { t: 'REPORTES', d: 'Inteligencia de datos e incidencias.' }
                                 ].map(item => `
                                 <tr>
-                                    <td style="padding:10px 0;border-top:1px solid #f1f5f9;">
-                                        <p style="margin:0;font-size:14px;font-weight:600;color:#1e293b;">${item.t}</p>
-                                        <p style="margin:2px 0 0;font-size:13px;color:#64748b;">${item.d}</p>
+                                    <td style="padding:12px 0;border-bottom:1px solid #f1f5f9;">
+                                        <table width="100%" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td width="100">
+                                                    <p style="margin:0;font-size:10px;font-weight:800;color:#2563eb;letter-spacing:0.5px;">${item.t}</p>
+                                                </td>
+                                                <td>
+                                                    <p style="margin:0;font-size:13px;color:#475569;font-weight:500;">${item.d}</p>
+                                                </td>
+                                            </tr>
+                                        </table>
                                     </td>
                                 </tr>
                                 `).join('')}
@@ -102,21 +118,23 @@ export async function enviarCorreoNuevoAdmin(nombre, correo, empresa_nombre, emp
                         </td>
                     </tr>
 
-                    <!-- FOOTER BAR -->
+                    <!-- TECHNICAL FOOTER -->
                     <tr>
-                        <td style="padding:32px 48px;background-color:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
-                            <p style="margin:0;font-size:12px;color:#94a3b8;">
-                                FASITLAC &bull; Sistema de Gestión de Asistencia Profesional<br>
-                                <span style="font-size:11px;margin-top:8px;display:block;">Este es un envío automático, favor de no responder.</span>
+                        <td style="padding:40px;background-color:#000000;text-align:left;">
+                            <p style="margin:0;font-size:11px;color:#ffffff;font-weight:400;letter-spacing:0.5px;line-height:1.8;">
+                                <strong style="color:#2563eb;font-weight:800;">FASITLAC CORE SYSTEM</strong><br>
+                                Sistema de Gestión de Asistencia Profesional<br>
+                                Propiedad de ${empresa_nombre || 'FASITLAC'}<br>
+                                <span style="color:#64748b;margin-top:10px;display:block;font-size:10px;">Este es un mensaje institucional generado automáticamente por el servidor de seguridad.</span>
                             </p>
                         </td>
                     </tr>
                 </table>
                 
-                <table width="100%" style="max-width:600px;margin-top:24px;">
+                <table width="100%" style="max-width:600px;margin-top:20px;">
                     <tr>
-                        <td style="text-align:center;">
-                            <p style="margin:0;font-size:11px;color:#cbd5e1;text-transform:uppercase;letter-spacing:0.5px;">Powered by FASITLAC Core</p>
+                        <td style="text-align:right;">
+                            <p style="margin:0;font-size:9px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Powered by FASITLAC v3.2.0</p>
                         </td>
                     </tr>
                 </table>
@@ -125,7 +143,7 @@ export async function enviarCorreoNuevoAdmin(nombre, correo, empresa_nombre, emp
     </table>
 </body>
 </html>
-            `
+`
         };
         const info = await transporter.sendMail(mailOptions);
         console.log(`Correo enviado a ${correo}: ${info.messageId}`);

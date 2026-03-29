@@ -233,9 +233,12 @@ export async function getDactilarByEmpleado(req, res) {
  */
 export async function identificarPorFacial(req, res) {
     try {
-        const { facial } = req.body;
+        const { facial, empresa_id } = req.body;
         if (!facial) {
             return res.status(400).json({ success: false, message: 'Se requiere el descriptor facial' });
+        }
+        if (!empresa_id) {
+            return res.status(400).json({ success: false, message: 'Se requiere id_empresa para identificación facial' });
         }
 
         const resultado = await pool.query(`
@@ -245,11 +248,11 @@ export async function identificarPorFacial(req, res) {
             FROM credenciales c
             INNER JOIN empleados e ON e.id = c.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE c.facial IS NOT NULL
-        `);
+            WHERE c.facial IS NOT NULL AND u.empresa_id = $1
+        `, [empresa_id]);
 
         if (resultado.rows.length === 0) {
-            return res.status(404).json({ success: false, message: 'No hay descriptores faciales registrados en el sistema' });
+            return res.status(404).json({ success: false, message: 'No hay rostros registrados para esta empresa' });
         }
 
         const descriptorRecibido = base64ToFloat32Array(facial);
@@ -404,9 +407,12 @@ function calcularDistanciaEuclidiana(desc1, desc2) {
  */
 export async function loginPorPin(req, res) {
     try {
-        const { usuario, pin } = req.body;
+        const { usuario, pin, empresa_id } = req.body;
         if (!usuario || !pin) {
             return res.status(400).json({ success: false, message: 'Usuario y PIN son requeridos' });
+        }
+        if (!empresa_id) {
+            return res.status(400).json({ success: false, message: 'Se requiere id_empresa para iniciar sesión' });
         }
 
         const resultado = await pool.query(`
@@ -418,8 +424,8 @@ export async function loginPorPin(req, res) {
             FROM credenciales c
             INNER JOIN empleados e ON e.id = c.empleado_id
             INNER JOIN usuarios u ON u.id = e.usuario_id
-            WHERE (u.usuario = $1 OR u.correo = $1)
-        `, [usuario]);
+            WHERE (u.usuario = $1 OR u.correo = $1) AND u.empresa_id = $2
+        `, [usuario, empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Usuario no encontrado o sin credenciales configuradas' });

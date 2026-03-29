@@ -198,6 +198,17 @@ export async function sincronizarAsistenciasPendientes(req, res) {
         // Convertir timestamp a fecha PostgreSQL
         const fecha_registro = new Date(registro.fecha_registro);
 
+        // Resolver empresa_id: viene del registro o del middleware
+        const empresa_id = registro.empresa_id || req.empresa_id;
+        if (!empresa_id) {
+          rechazados.push({
+            id_local: registro.id,
+            error: 'Se requiere el empresa_id para registrar la asistencia',
+            codigo: 'EMPRESA_REQUERIDA'
+          });
+          continue;
+        }
+
         // Insertar en la base de datos
         const horarioSnapshot = registro.horario_snapshot
           ? (typeof registro.horario_snapshot === 'string' ? registro.horario_snapshot : JSON.stringify(registro.horario_snapshot))
@@ -211,10 +222,11 @@ export async function sincronizarAsistenciasPendientes(req, res) {
             empleado_id,
             departamento_id,
             tipo,
+            empresa_id,
             fecha_registro,
             horario_snapshot
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `, [
           servidor_id,
           registro.estado || registro.clasificacion,
@@ -223,6 +235,7 @@ export async function sincronizarAsistenciasPendientes(req, res) {
           registro.empleado_id,
           registro.departamento_id,
           registro.tipo,
+          empresa_id,
           fecha_registro,
           horarioSnapshot
         ]);

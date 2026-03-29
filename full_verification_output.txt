@@ -1,0 +1,20 @@
+--- Verification Starting ---
+Creating test user...
+Simulating 5 failed attempts...
+2026-03-24 19:47:55 [32minfo[39m: ✅ Conectado a la base de datos PostgreSQL
+Attempt 1: Status 401, Message: Credenciales inválidas. Intento 1 de 5.
+Attempt 2: Status 401, Message: Credenciales inválidas. Intento 2 de 5.
+Attempt 3: Status 401, Message: Credenciales inválidas. Intento 3 de 5.
+Attempt 4: Status 401, Message: Credenciales inválidas. Intento 4 de 5.
+Attempt 5: Status 401, Message: Demasiados intentos fallidos. Su cuenta ha sido bloqueada por 30 minutos.
+Verifying user status in DB...
+DB State: {
+  "estado_cuenta": "bloqueado",
+  "intentos_fallidos": 5,
+  "bloqueado_hasta": "2026-03-25T02:17:55.884Z"
+}
+✅ Account successfully blocked!
+Testing login attempt while blocked...
+Status 403, Message: Esta cuenta ha sido bloqueada por seguridad tras múltiples intentos fallidos. Contacte al administrador.
+Cleanup: Deleting test user
+--- Verification Finished ---

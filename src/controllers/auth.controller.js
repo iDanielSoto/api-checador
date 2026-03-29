@@ -20,7 +20,8 @@ export async function login(req, res) {
         }
 
         // Buscar usuario por nombre de usuario o correo, incluyendo nombre de empresa
-        const resultado = await pool.query(`
+        const params = [usuario];
+        let query = `
             SELECT
                 u.id,
                 u.usuario,
@@ -30,26 +31,41 @@ export async function login(req, res) {
                 u.foto,
                 u.telefono,
                 u.estado_cuenta,
+                u.intentos_fallidos,
+                u.bloqueado_hasta,
                 u.es_empleado,
                 u.empresa_id,
                 emp.nombre as empresa_nombre,
                 e.id as empleado_id,
                 e.rfc,
-                e.nss
+                e.nss,
+                cfg.intentos_maximos,
+                cfg.cooldown_bloqueo
             FROM usuarios u
             LEFT JOIN empleados e ON e.usuario_id = u.id
             LEFT JOIN empresas emp ON emp.id = u.empresa_id
+            LEFT JOIN configuraciones cfg ON cfg.id = emp.configuracion_id
             WHERE (u.usuario = $1 OR u.correo = $1)
-        `, [usuario]);
+        `;
+
+        // Si se envió empresaIdReq, filtramos directamente en la consulta
+        if (empresaIdReq) {
+            query += ` AND u.empresa_id = $2`;
+            params.push(empresaIdReq);
+        }
+
+        const resultado = await pool.query(query, params);
 
         if (resultado.rows.length === 0) {
             return res.status(401).json({
                 success: false,
-                message: 'Credenciales inválidas'
+                message: empresaIdReq 
+                    ? 'Credenciales inválidas o usuario no perteneciente a esta empresa'
+                    : 'Credenciales inválidas'
             });
         }
 
-        // Si hay varios usuarios con el mismo correo, manejar multi‑tenant
+        // Si hay varios usuarios con el mismo correo y NO se envió empresa_id, manejar multi‑tenant
         if (resultado.rows.length > 1 && !empresaIdReq) {
             // Devolver lista de empresas para que el cliente elija
             const empresas = resultado.rows.map(r => ({
@@ -63,22 +79,36 @@ export async function login(req, res) {
             });
         }
 
-        // Si se envió empresa_id, filtrar la fila correspondiente
-        let usuarioData;
-        if (empresaIdReq) {
-            usuarioData = resultado.rows.find(r => r.empresa_id === empresaIdReq);
-            if (!usuarioData) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Usuario no encontrado en la empresa especificada'
-                });
+        // Si llegamos aquí, ya tenemos el usuario desambiguado (sea por ser único o por filtro previo)
+        let usuarioData = resultado.rows[0];
+
+        // Si no se obtuvo configuración de la empresa (ej. usuarios sin empresa o MASTER), buscar la más reciente
+        if (usuarioData.intentos_maximos === undefined || usuarioData.intentos_maximos === null) {
+            const globalCfg = await pool.query('SELECT intentos_maximos, cooldown_bloqueo FROM configuraciones ORDER BY id DESC LIMIT 1');
+            if (globalCfg.rows.length > 0) {
+                usuarioData.intentos_maximos = globalCfg.rows[0].intentos_maximos;
+                usuarioData.cooldown_bloqueo = globalCfg.rows[0].cooldown_bloqueo;
             }
-        } else {
-            // Caso único
-            usuarioData = resultado.rows[0];
         }
 
-        // Verificar estado de cuenta
+        // Verificar bloqueo temporal
+        if (usuarioData.bloqueado_hasta && new Date(usuarioData.bloqueado_hasta) > new Date()) {
+            const segundosRestantes = Math.ceil((new Date(usuarioData.bloqueado_hasta) - new Date()) / 1000);
+            let tiempoRestanteStr = "";
+            
+            if (segundosRestantes > 60) {
+                tiempoRestanteStr = `${Math.ceil(segundosRestantes / 60)} minutos`;
+            } else {
+                tiempoRestanteStr = `${segundosRestantes} segundos`;
+            }
+
+            return res.status(403).json({
+                success: false,
+                message: `Demasiados intentos. Bloqueo temporal activo. Intente de nuevo en ${tiempoRestanteStr}.`
+            });
+        }
+
+        // Verificar estado de cuenta general
         if (usuarioData.estado_cuenta !== 'activo') {
             return res.status(403).json({
                 success: false,
@@ -86,14 +116,53 @@ export async function login(req, res) {
             });
         }
 
+        // Configuración de bloqueo
+        const maxIntentos = usuarioData.intentos_maximos || 5;
+        const cooldownSegundos = usuarioData.cooldown_bloqueo || 1800;
+
         // Verificar contraseña
         const contraseñaValida = await bcrypt.compare(contraseña, usuarioData.contraseña);
 
         if (!contraseñaValida) {
-            return res.status(401).json({
-                success: false,
-                message: 'Credenciales inválidas'
-            });
+            // Incrementar intentos fallidos
+            const nuevosIntentos = (usuarioData.intentos_fallidos || 0) + 1;
+            
+            if (nuevosIntentos >= maxIntentos) {
+                // Bloquear login temporalmente
+                const bloqueoHasta = new Date(Date.now() + cooldownSegundos * 1000);
+                await pool.query(
+                    'UPDATE usuarios SET intentos_fallidos = $1, bloqueado_hasta = $2 WHERE id = $3',
+                    [nuevosIntentos, bloqueoHasta, usuarioData.id]
+                );
+                
+                let cooldownStr = cooldownSegundos >= 60 
+                    ? `${Math.ceil(cooldownSegundos / 60)} minutos` 
+                    : `${cooldownSegundos} segundos`;
+
+                return res.status(401).json({
+                    success: false,
+                    message: `Demasiados intentos fallidos. Login bloqueado por ${cooldownStr}.`
+                });
+            } else {
+                // Solo incrementar contador
+                await pool.query(
+                    'UPDATE usuarios SET intentos_fallidos = $1 WHERE id = $2',
+                    [nuevosIntentos, usuarioData.id]
+                );
+
+                return res.status(401).json({
+                    success: false,
+                    message: `Credenciales inválidas. Intento ${nuevosIntentos} de ${maxIntentos}.`
+                });
+            }
+        }
+
+        // Si la contraseña es válida, resetear intentos fallidos y bloqueo
+        if (usuarioData.intentos_fallidos > 0 || usuarioData.bloqueado_hasta) {
+            await pool.query(
+                'UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = $1',
+                [usuarioData.id]
+            );
         }
 
         // Obtener roles del usuario

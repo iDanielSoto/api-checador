@@ -5,13 +5,17 @@ import {
     createEscritorio,
     updateEscritorio,
     deleteEscritorio,
-    reactivarEscritorio
+    reactivarEscritorio,
+    getEscritorioStatusPublico
 } from '../controllers/escritorio.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
+
+// Rutas públicas (No requieren token)
+router.get('/public/status/:id', getEscritorioStatusPublico);
 
 router.use(verificarAutenticacion);
 router.use(verificarEmpresa);

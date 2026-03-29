@@ -1,14 +1,3 @@
-export const ASISTENCIA = {
-    MINUTOS_SEPARACION_TURNOS: 15,
-    TOLERANCIA_DEFECTO: {
-        minutos_retardo: 10,
-        minutos_falta: 30,
-        permite_registro_anticipado: true,
-        minutos_anticipado_max: 60,
-        aplica_tolerancia_salida: false
-    }
-};
-
 export const HTTP_STATUS = {
     OK: 200,
     CREATED: 201,

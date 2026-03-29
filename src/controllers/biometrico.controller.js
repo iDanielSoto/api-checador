@@ -23,11 +23,11 @@ export async function getBiometricos(req, res) {
                 b.escritorio_id,
                 e.nombre as escritorio_nombre
             FROM biometrico b
-            LEFT JOIN escritorio e ON e.id = b.escritorio_id
-            WHERE 1=1
+            INNER JOIN escritorio e ON e.id = b.escritorio_id
+            WHERE e.empresa_id = $1
         `;
-        const params = [];
-        let paramIndex = 1;
+        const params = [req.empresa_id];
+        let paramIndex = 2;
 
         if (tipo) {
             query += ` AND b.tipo = $${paramIndex++}`;
@@ -80,14 +80,14 @@ export async function getBiometricoById(req, res) {
                 b.*,
                 e.nombre as escritorio_nombre
             FROM biometrico b
-            LEFT JOIN escritorio e ON e.id = b.escritorio_id
-            WHERE b.id = $1
-        `, [id]);
+            INNER JOIN escritorio e ON e.id = b.escritorio_id
+            WHERE b.id = $1 AND e.empresa_id = $2
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'Lector biométrico no encontrado'
+                message: 'Lector biométrico no encontrado o no pertenece a la empresa'
             });
         }
 
@@ -121,11 +121,67 @@ export async function createBiometrico(req, res) {
             device_id    // identificador real del hardware
         } = req.body;
 
-        if (!nombre || !tipo) {
+        if (!nombre || !tipo || !escritorio_id) {
             return res.status(400).json({
                 success: false,
-                message: 'nombre y tipo son requeridos'
+                message: 'nombre, tipo y escritorio_id son requeridos'
             });
+        }
+
+        // 1. Validar que el escritorio pertenezca a la empresa
+        const escRes = await pool.query('SELECT id FROM escritorio WHERE id = $1 AND empresa_id = $2', [escritorio_id, req.empresa_id]);
+        if (escRes.rows.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'El escritorio especificado no pertenece a su empresa o no existe'
+            });
+        }
+
+        // 2. Verificar duplicados por device_id en el mismo escritorio
+        if (device_id) {
+            const existe = await pool.query(
+                'SELECT id, es_activo FROM biometrico WHERE device_id = $1 AND escritorio_id = $2',
+                [device_id, escritorio_id]
+            );
+
+            if (existe.rows.length > 0) {
+                const lector = existe.rows[0];
+                if (lector.es_activo) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Este dispositivo ya se encuentra registrado y activo en este escritorio'
+                    });
+                } else {
+                    // REACTIVACIÓN AUTOMÁTICA
+                    const reactivado = await pool.query(`
+                        UPDATE biometrico SET
+                            nombre = $1,
+                            descripcion = $2,
+                            tipo = $3,
+                            puerto = $4,
+                            ip = $5,
+                            estado = 'desconectado',
+                            es_activo = true
+                        WHERE id = $6
+                        RETURNING *
+                    `, [nombre, descripcion, tipo, puerto, ip, lector.id]);
+
+                    await registrarEvento({
+                        titulo: 'Lector biométrico reactivado',
+                        descripcion: `Se reactivó automáticamente el lector "${nombre}" (${device_id})`,
+                        tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+                        prioridad: PRIORIDADES.MEDIA,
+                        usuario_modificador_id: req.usuario?.id,
+                        detalles: { biometrico_id: lector.id, device_id, escritorio_id }
+                    });
+
+                    return res.json({
+                        success: true,
+                        message: 'Dispositivo reactivado correctamente',
+                        data: reactivado.rows[0]
+                    });
+                }
+            }
         }
 
         const id = await generateId(ID_PREFIXES.BIOMETRICO);
@@ -181,24 +237,25 @@ export async function updateBiometrico(req, res) {
         } = req.body;
 
         const resultado = await pool.query(`
-            UPDATE biometrico SET
-                nombre = COALESCE($1, nombre),
-                descripcion = COALESCE($2, descripcion),
-                tipo = COALESCE($3, tipo),
-                puerto = COALESCE($4, puerto),
-                ip = COALESCE($5, ip),
-                estado = COALESCE($6, estado),
-                es_activo = COALESCE($7, es_activo),
-                escritorio_id = COALESCE($8, escritorio_id),
-                device_id = COALESCE($9, device_id)
-            WHERE id = $10
-            RETURNING *
-        `, [nombre, descripcion, tipo, puerto, ip, estado, es_activo, escritorio_id, device_id, id]);
+            UPDATE biometrico b SET
+                nombre = COALESCE($1, b.nombre),
+                descripcion = COALESCE($2, b.descripcion),
+                tipo = COALESCE($3, b.tipo),
+                puerto = COALESCE($4, b.puerto),
+                ip = COALESCE($5, b.ip),
+                estado = COALESCE($6, b.estado),
+                es_activo = COALESCE($7, b.es_activo),
+                escritorio_id = COALESCE($8, b.escritorio_id),
+                device_id = COALESCE($9, b.device_id)
+            FROM escritorio e
+            WHERE b.id = $10 AND b.escritorio_id = e.id AND e.empresa_id = $11
+            RETURNING b.*
+        `, [nombre, descripcion, tipo, puerto, ip, estado, es_activo, escritorio_id, device_id, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'Lector biométrico no encontrado'
+                message: 'Lector biométrico no encontrado o no pertenece a la empresa'
             });
         }
 
@@ -244,15 +301,16 @@ export async function updateEstadoBiometrico(req, res) {
         }
 
         const resultado = await pool.query(`
-            UPDATE biometrico SET estado = $1
-            WHERE id = $2
-            RETURNING id, nombre, estado
-        `, [estado, id]);
+            UPDATE biometrico b SET estado = $1
+            FROM escritorio e
+            WHERE b.id = $2 AND b.escritorio_id = e.id AND e.empresa_id = $3 AND b.es_activo = true
+            RETURNING b.id, b.nombre, b.estado
+        `, [estado, id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'Lector biométrico no encontrado'
+                message: 'Lector biométrico no encontrado o no pertenece a la empresa'
             });
         }
 
@@ -280,15 +338,16 @@ export async function deleteBiometrico(req, res) {
         const { id } = req.params;
 
         const resultado = await pool.query(`
-            UPDATE biometrico SET es_activo = false
-            WHERE id = $1 AND es_activo = true
-            RETURNING id
-        `, [id]);
+            UPDATE biometrico b SET es_activo = false
+            FROM escritorio e
+            WHERE b.id = $1 AND b.escritorio_id = e.id AND e.empresa_id = $2 AND b.es_activo = true
+            RETURNING b.id
+        `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'Lector no encontrado o ya desactivado'
+                message: 'Lector no encontrado, ya desactivado o no pertenece a la empresa'
             });
         }
 
@@ -325,14 +384,15 @@ export async function getStatsBiometrico(req, res) {
         const resultado = await pool.query(`
             SELECT
                 COUNT(*) as total,
-                COUNT(*) FILTER (WHERE estado = 'conectado') as conectados,
-                COUNT(*) FILTER (WHERE estado = 'desconectado') as desconectados,
-                COUNT(*) FILTER (WHERE estado = 'error') as con_error,
-                COUNT(*) FILTER (WHERE tipo = 'facial') as faciales,
-                COUNT(*) FILTER (WHERE tipo = 'dactilar') as dactilares
-            FROM biometrico
-            WHERE es_activo = true
-        `);
+                COUNT(*) FILTER (WHERE b.estado = 'conectado') as conectados,
+                COUNT(*) FILTER (WHERE b.estado = 'desconectado') as desconectados,
+                COUNT(*) FILTER (WHERE b.estado = 'error') as con_error,
+                COUNT(*) FILTER (WHERE b.tipo = 'facial') as faciales,
+                COUNT(*) FILTER (WHERE b.tipo = 'dactilar') as dactilares
+            FROM biometrico b
+            INNER JOIN escritorio e ON e.id = b.escritorio_id
+            WHERE b.es_activo = true AND e.empresa_id = $1
+        `, [req.empresa_id]);
 
         res.json({
             success: true,
@@ -377,7 +437,7 @@ export async function syncBiometricoStatus(req, res) {
         await client.query(`
             UPDATE biometrico 
             SET estado = 'desconectado' 
-            WHERE escritorio_id = $1
+            WHERE escritorio_id = $1 AND es_activo = true
         `, [escritorio_id]);
 
         // 2. Encender solo las conectadas que coincidan
@@ -385,7 +445,7 @@ export async function syncBiometricoStatus(req, res) {
             await client.query(`
                 UPDATE biometrico 
                 SET estado = 'conectado' 
-                WHERE escritorio_id = $1 AND device_id = ANY($2)
+                WHERE escritorio_id = $1 AND device_id = ANY($2) AND es_activo = true
             `, [escritorio_id, device_ids]);
         }
 

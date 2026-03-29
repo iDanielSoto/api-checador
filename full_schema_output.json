@@ -1,0 +1,67 @@
+--- Columns in usuarios ---
+2026-03-24 19:43:14 [32minfo[39m: ✅ Conectado a la base de datos PostgreSQL
+[
+  {
+    "column_name": "id",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "usuario",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "correo",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "contraseña",
+    "data_type": "text",
+    "udt_name": "text"
+  },
+  {
+    "column_name": "nombre",
+    "data_type": "text",
+    "udt_name": "text"
+  },
+  {
+    "column_name": "foto",
+    "data_type": "text",
+    "udt_name": "text"
+  },
+  {
+    "column_name": "telefono",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  },
+  {
+    "column_name": "estado_cuenta",
+    "data_type": "USER-DEFINED",
+    "udt_name": "tipo_estado_cuenta"
+  },
+  {
+    "column_name": "es_empleado",
+    "data_type": "boolean",
+    "udt_name": "bool"
+  },
+  {
+    "column_name": "fecha_registro",
+    "data_type": "timestamp without time zone",
+    "udt_name": "timestamp"
+  },
+  {
+    "column_name": "clave_seguridad",
+    "data_type": "integer",
+    "udt_name": "int4"
+  },
+  {
+    "column_name": "empresa_id",
+    "data_type": "character varying",
+    "udt_name": "varchar"
+  }
+]
+
+--- Enum values for estado_cuenta ---
+[]

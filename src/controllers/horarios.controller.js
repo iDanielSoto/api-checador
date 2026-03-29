@@ -152,7 +152,7 @@ export async function asignarHorario(req, res) {
 export async function importarHorariosCsv(req, res) {
     const client = await pool.connect();
     try {
-        const { registros } = req.body;
+        const { registros, solo_analizar = false } = req.body;
         
         if (!registros || !Array.isArray(registros)) {
             return res.status(400).json({ 
@@ -165,12 +165,14 @@ export async function importarHorariosCsv(req, res) {
 
         let procesados = 0;
         let errores = [];
+        let resumenAnalisis = [];
 
         // Precargar empleados (empleados no tiene empresa_id, buscar por u.empresa_id)
         const empleadosRes = await client.query(`
-            SELECT e.id, e.rfc, e.horario_id 
+            SELECT e.id, e.rfc, e.horario_id, h.fecha_inicio
             FROM empleados e 
             INNER JOIN usuarios u ON u.id = e.usuario_id 
+            LEFT JOIN horarios h ON h.id = e.horario_id
             WHERE u.empresa_id = $1
         `, [req.empresa_id]);
         const empleadosMap = {};
@@ -178,77 +180,104 @@ export async function importarHorariosCsv(req, res) {
             if (e.rfc) empleadosMap[e.rfc.toUpperCase().trim()] = e;
         });
 
+        // 1. Agrupar registros por RFC + Fecha_Inicio para permitir múltiples filas por empleado (fusión de turnos)
+        const grupos = {};
         for (let i = 0; i < registros.length; i++) {
             const row = registros[i];
             const rfcInput = (row.RFC || '').toUpperCase().trim();
-            const filaNum = i + 2; // +1 por el indice 0 y +1 por el header
+            const csvFechaInicio = row.Fecha_Inicio || row.FechaInicio || new Date().toISOString().split('T')[0];
+            
+            if (!rfcInput) continue;
 
-            if (!rfcInput) {
-                continue; // Saltar filas vacías
+            const key = `${rfcInput}_${csvFechaInicio}`;
+            if (!grupos[key]) {
+                grupos[key] = {
+                    rfc: rfcInput,
+                    fecha_inicio: csvFechaInicio,
+                    filas: [],
+                    tipoPeriodo: (row.TipoPeriodo || 'semestral').toLowerCase().trim()
+                };
             }
+            grupos[key].filas.push({ data: row, num: i + 2 });
+        }
+
+        for (const key in grupos) {
+            const grupo = grupos[key];
+            const rfcInput = grupo.rfc;
+            const csvFechaInicio = grupo.fecha_inicio;
 
             const empleadoDb = empleadosMap[rfcInput];
             if (!empleadoDb) {
-                errores.push(`Fila ${filaNum}: No se encontró un empleado activo con el RFC '${rfcInput}'`);
+                errores.push(`Empleado [${rfcInput}]: No se encontró un empleado activo con este RFC.`);
                 continue;
             }
+
+            // Lógica de sobrescritura inteligente
+            let targetHorarioId = null;
+            let esSobrescritura = false;
 
             if (empleadoDb.horario_id) {
-                errores.push(`Fila ${filaNum}: El empleado '${rfcInput}' ya tiene un horario asignado en el sistema.`);
-                continue;
+                const dbFechaInicio = empleadoDb.fecha_inicio ? new Date(empleadoDb.fecha_inicio).toISOString().split('T')[0] : null;
+                if (dbFechaInicio === csvFechaInicio) {
+                    targetHorarioId = empleadoDb.horario_id;
+                    esSobrescritura = true;
+                }
             }
 
-            // Construir configuración
+            // Construir configuración fusionada de todas las filas del grupo
             const timeReg = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
             const config = { lunes: [], martes: [], miercoles: [], jueves: [], viernes: [], sabado: [], domingo: [] };
             let erroresFila = [];
             
-            const mapDia = (diaKey, csvKeyInicio, csvKeyFin) => {
-                const inicio = row[csvKeyInicio]?.trim();
-                const fin = row[csvKeyFin]?.trim();
-                
-                if (!inicio && !fin) return; // Día libre, no hay error
+            grupo.filas.forEach(f => {
+                const row = f.data;
+                const mapDia = (diaKey, csvKeyInicio, csvKeyFin) => {
+                    const inicio = row[csvKeyInicio]?.trim();
+                    const fin = row[csvKeyFin]?.trim();
+                    if (!inicio && !fin) return;
 
-                if (inicio && !fin) {
-                    erroresFila.push(`Día ${diaKey} incompleto (falta hora de fin).`);
-                    return;
-                }
-                if (!inicio && fin) {
-                    erroresFila.push(`Día ${diaKey} incompleto (falta hora de inicio).`);
-                    return;
-                }
+                    if (inicio && (!fin || !timeReg.test(fin))) {
+                        erroresFila.push(`Fila ${f.num}: ${diaKey} incompleto o formato inválido.`);
+                        return;
+                    }
+                    if (!inicio || !timeReg.test(inicio)) {
+                        erroresFila.push(`Fila ${f.num}: ${diaKey} incompleto o formato inválido.`);
+                        return;
+                    }
 
-                if (!timeReg.test(inicio)) {
-                    erroresFila.push(`Día ${diaKey} hora de inicio (${inicio}) tiene formato inválido.`);
-                    return;
-                }
-                if (!timeReg.test(fin)) {
-                    erroresFila.push(`Día ${diaKey} hora de fin (${fin}) tiene formato inválido.`);
-                    return;
-                }
+                    if (inicio >= fin) {
+                        erroresFila.push(`Fila ${f.num}: ${diaKey} inicio (${inicio}) >= fin (${fin}).`);
+                        return;
+                    }
 
-                if (inicio >= fin) {
-                    erroresFila.push(`Día ${diaKey}: La hora de inicio (${inicio}) debe ser menor estricto a la hora de fin (${fin}).`);
-                    return;
-                }
+                    // Validación de solapamiento dentro del mismo día para este grupo
+                    const existeSolapamiento = config[diaKey].find(existente => 
+                        (inicio < existente.fin) && (fin > existente.inicio)
+                    );
 
-                config[diaKey].push({ inicio, fin });
-            };
+                    if (existeSolapamiento) {
+                        erroresFila.push(`Fila ${f.num}: ${diaKey} solapa con otro turno el mismo día (${inicio}-${fin} vs ${existeSolapamiento.inicio}-${existeSolapamiento.fin}).`);
+                        return;
+                    }
 
-            mapDia('lunes', 'Lunes_Inicio', 'Lunes_Fin');
-            mapDia('martes', 'Martes_Inicio', 'Martes_Fin');
-            mapDia('miercoles', 'Miercoles_Inicio', 'Miercoles_Fin');
-            mapDia('jueves', 'Jueves_Inicio', 'Jueves_Fin');
-            mapDia('viernes', 'Viernes_Inicio', 'Viernes_Fin');
-            mapDia('sabado', 'Sabado_Inicio', 'Sabado_Fin');
-            mapDia('domingo', 'Domingo_Inicio', 'Domingo_Fin');
+                    config[diaKey].push({ inicio, fin });
+                };
+
+                mapDia('lunes', 'Lunes_Inicio', 'Lunes_Fin');
+                mapDia('martes', 'Martes_Inicio', 'Martes_Fin');
+                mapDia('miercoles', 'Miercoles_Inicio', 'Miercoles_Fin');
+                mapDia('jueves', 'Jueves_Inicio', 'Jueves_Fin');
+                mapDia('viernes', 'Viernes_Inicio', 'Viernes_Fin');
+                mapDia('sabado', 'Sabado_Inicio', 'Sabado_Fin');
+                mapDia('domingo', 'Domingo_Inicio', 'Domingo_Fin');
+            });
 
             if (erroresFila.length > 0) {
-                errores.push(`Fila ${filaNum} [${rfcInput}]:\n  - ${erroresFila.join('\n  - ')}`);
+                errores.push(`ID [${rfcInput}]:\n  - ${erroresFila.slice(0, 3).join('\n  - ')}${erroresFila.length > 3 ? `\n  - (+${erroresFila.length - 3} más)` : ''}`);
                 continue;
             }
 
-            const tipoPeriodo = row.TipoPeriodo?.toLowerCase().trim() === 'intersemestral' ? 'intersemestral' : 'semestral';
+            const tipoPeriodo = grupo.tipoPeriodo === 'intersemestral' ? 'intersemestral' : 'semestral';
 
             const configuracionJson = JSON.stringify({
                 configuracion_semanal: config,
@@ -256,26 +285,48 @@ export async function importarHorariosCsv(req, res) {
                 excepciones: {}
             });
 
-            const horarioId = await generateId(ID_PREFIXES.HORARIO);
-            const hoyStr = new Date().toISOString().split('T')[0];
-
-            await client.query(`
-                INSERT INTO horarios (id, fecha_inicio, fecha_fin, configuracion, es_activo, empresa_id)
-                VALUES ($1, $2, null, $3, true, $4)
-            `, [horarioId, hoyStr, configuracionJson, req.empresa_id]);
-
-            // Desvincular cualquier horario previo de ese empleado solo por limpieza (opcional)
-            await client.query(`
-                UPDATE empleados 
-                SET horario_id = $1 
-                WHERE id = $2
-            `, [horarioId, empleadoId]);
+            if (solo_analizar) {
+                resumenAnalisis.push({
+                    rfc: rfcInput,
+                    operacion: esSobrescritura ? 'actualizar' : 'crear',
+                    detalles: esSobrescritura ? `Actualizar horario del ${csvFechaInicio} (${grupo.filas.length} turnos)` : `Nuevo horario desde el ${csvFechaInicio} (${grupo.filas.length} turnos)`
+                });
+            } else {
+                if (esSobrescritura) {
+                    await client.query(`UPDATE horarios SET configuracion = $1 WHERE id = $2`, [configuracionJson, targetHorarioId]);
+                } else {
+                    const nuevoHorarioId = await generateId(ID_PREFIXES.HORARIO);
+                    await client.query(`
+                        INSERT INTO horarios (id, fecha_inicio, fecha_fin, configuracion, es_activo, empresa_id)
+                        VALUES ($1, $2, null, $3, true, $4)
+                    `, [nuevoHorarioId, csvFechaInicio, configuracionJson, req.empresa_id]);
+                    await client.query(`UPDATE empleados SET horario_id = $1 WHERE id = $2`, [nuevoHorarioId, empleadoDb.id]);
+                }
+            }
 
             procesados++;
         }
 
-        if (procesados === 0 && errores.length > 0) {
+        // Si es solo análisis o hubo errores críticos, hacemos rollback
+        if (solo_analizar || (procesados === 0 && errores.length > 0)) {
             await client.query('ROLLBACK');
+            
+            if (solo_analizar) {
+                return res.json({
+                    success: true,
+                    is_analysis: true,
+                    resumen: {
+                        total: registros.length,
+                        procesables: procesados,
+                        errores: errores.length,
+                        crear: resumenAnalisis.filter(a => a.operacion === 'crear').length,
+                        actualizar: resumenAnalisis.filter(a => a.operacion === 'actualizar').length
+                    },
+                    detalles: resumenAnalisis,
+                    notificaciones: errores
+                });
+            }
+
             return res.status(400).json({
                 success: false,
                 message: errores
@@ -296,9 +347,9 @@ export async function importarHorariosCsv(req, res) {
 
         // Modificamos el mensaje si hubo errores pero algunos pasaron
         if (errores.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: ['Algunas filas no se procesaron:', ...errores],
+            return res.json({
+                success: true,
+                message: [`Importación parcial completada (${procesados} registros).`],
                 meta: { procesados, fallidos: errores }
             });
         }

@@ -139,7 +139,8 @@ export async function updateConfiguracion(req, res) {
             orden_credenciales,
             segmentos_red,
             intervalo_bloques_minutos,
-            requiere_salida
+            requiere_salida,
+            cooldown_bloqueo
         } = req.body;
 
         // Si orden_credenciales llega como string ya serializado, parsear primero
@@ -176,7 +177,8 @@ export async function updateConfiguracion(req, res) {
                 orden_credenciales = $8,
                 segmentos_red = $9,
                 intervalo_bloques_minutos = $11,
-                requiere_salida = $12
+                requiere_salida = $12,
+                cooldown_bloqueo = $13
             WHERE id = $10
             RETURNING *
         `, [
@@ -191,7 +193,8 @@ export async function updateConfiguracion(req, res) {
             segmentosJson,
             id,
             intervalo_bloques_minutos ?? 60,
-            requiere_salida ?? true
+            requiere_salida ?? true,
+            cooldown_bloqueo ?? 1800
         ]);
 
         if (resultado.rows.length === 0) {

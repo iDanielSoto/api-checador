@@ -316,8 +316,8 @@ export async function deleteEscritorio(req, res) {
 
         // Desactivar en cascada los biométricos asociados al escritorio
         const bioResult = await pool.query(`
-            UPDATE biometrico SET es_activo = false
-            WHERE escritorio_id = $1 AND es_activo = true
+            UPDATE biometrico SET es_activo = false, estado = 'desconectado'
+            WHERE escritorio_id = $1
             RETURNING id
         `, [id]);
 
@@ -385,6 +385,48 @@ export async function reactivarEscritorio(req, res) {
         res.status(500).json({
             success: false,
             message: 'Error al reactivar dispositivo'
+        });
+    }
+}
+
+/**
+ * GET /api/escritorio/public/status/:id
+ * Consulta el estado de un dispositivo de escritorio de forma pública (sin token)
+ */
+export async function getEscritorioStatusPublico(req, res) {
+    try {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: 'ID de dispositivo requerido'
+            });
+        }
+
+        const resultado = await pool.query(`
+            SELECT id, nombre, es_activo 
+            FROM escritorio 
+            WHERE id = $1
+        `, [id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Dispositivo no encontrado'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: resultado.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Error en getEscritorioStatusPublico:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al consultar estado del dispositivo'
         });
     }
 }

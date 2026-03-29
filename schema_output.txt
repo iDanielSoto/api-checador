@@ -1,0 +1,12 @@
+empleados: id, rfc, nss, fecha_registro, horario_id, usuario_id, regimen_laboral, contadores
+
+configuraciones: id, idioma, es_mantenimiento, formato_fecha, formato_hora, zona_horaria, paleta_colores, intentos_maximos, orden_credenciales, segmentos_red, tolerancia_id, intervalo_bloques_minutos, requiere_salida
+
+tolerancias: id, nombre, permite_registro_anticipado, minutos_anticipado_max, aplica_tolerancia_entrada, aplica_tolerancia_salida, dias_aplica, fecha_registro, es_activo, empresa_id, reglas, minutos_anticipo_salida, minutos_posterior_salida
+
+empresas: id, nombre, logo, es_activo, fecha_registro, configuracion_id, telefono, correo, limite_empleados, limite_dispositivos, fecha_vencimiento, prefijo, identificador, motor_asistencias, configuracion_reportes, tipo_institucion
+
+departamentos: id, nombre, descripcion, fecha_registro, es_activo, color, ubicacion, jefes, empresa_id
+
+horarios: id, fecha_inicio, fecha_fin, configuracion, es_activo, empresa_id
+
