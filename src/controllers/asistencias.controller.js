@@ -109,7 +109,7 @@ export async function getPreflightEstadoAsistencia(req, res) {
 
 async function registrarAsistenciaMovil(req, res) {
     try {
-        const { empleado_id, dispositivo_origen, ubicacion, departamento_id, tipo: tipoForzado, fecha_captura } = req.body;
+        const { empleado_id, dispositivo_origen, ubicacion, departamento_id, tipo: tipoForzado, fecha_captura, metodo } = req.body;
 
         // 1. Buscar reglas de tolerancia
         const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
@@ -177,9 +177,41 @@ async function registrarAsistenciaMovil(req, res) {
         // y NO req.ip (que es la IP pública WAN del servidor, inútil para validar segmentos LAN).
         try {
             const ipDispositivo = req.body.ip || null;
-            srvValidarZonaYRed(ubicacion, null, ipDispositivo, tolerancia.segmentos_red);
+
+            // Omisión de Red: consultar si este empleado tiene bypass autorizado en configuración
+            const omisionQuery = await pool.query(`
+                SELECT c.omision_red_activa, c.omision_red_empleados, u.id as usuario_id
+                FROM configuraciones c
+                INNER JOIN empresas emp ON emp.configuracion_id = c.id
+                INNER JOIN empleados e ON e.id = $1
+                INNER JOIN usuarios u ON u.id = e.usuario_id
+                WHERE emp.id = $2
+                LIMIT 1
+            `, [empleado_id, req.empresa_id]);
+
+            const omisionCfg = omisionQuery.rows[0];
+            const omisionRedActiva = omisionCfg?.omision_red_activa === true;
+            const omisionRedEmpleados = (() => {
+                const raw = omisionCfg?.omision_red_empleados;
+                if (!raw) return [];
+                if (Array.isArray(raw)) return raw;
+                if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return []; } }
+                return [];
+            })();
+            const usuarioId = omisionCfg?.usuario_id || null;
+            const omitirRed = omisionRedActiva && (
+                omisionRedEmpleados.includes(String(empleado_id)) ||
+                omisionRedEmpleados.includes(String(usuarioId))
+            );
+
+            if (!omitirRed) {
+                srvValidarZonaYRed(ubicacion, null, ipDispositivo, tolerancia.segmentos_red);
+            }
         } catch (e) {
-            return res.status(403).json({ success: false, message: e.message });
+            if (e.message?.includes('Acceso denegado')) {
+                return res.status(403).json({ success: false, message: e.message });
+            }
+            throw e;
         }
 
         // 8. Validar dentro de horario y reglas
@@ -206,7 +238,7 @@ async function registrarAsistenciaMovil(req, res) {
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
             `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5, $6)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal }), fechaRegistroSql]
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal, metodo: metodo ? metodo.toLowerCase() : 'desconocido' }), fechaRegistroSql]
         );
 
         // 9. Aumentar conteo (si es retardo)
@@ -233,7 +265,7 @@ async function registrarAsistenciaMovil(req, res) {
 
 async function registrarAsistenciaEscritorio(req, res) {
     try {
-        const { empleado_id, dispositivo_origen, departamento_id, tipo: tipoForzado, fecha_captura } = req.body;
+        const { empleado_id, dispositivo_origen, departamento_id, tipo: tipoForzado, fecha_captura, metodo } = req.body;
 
         // 1. Buscar reglas de tolerancia
         const { empleado, tolerancia, horario } = await srvBuscarConfiguracion(empleado_id, req.empresa_id);
@@ -321,7 +353,7 @@ async function registrarAsistenciaEscritorio(req, res) {
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
         await pool.query(
             `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5, $6)`,
-            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal }), fechaRegistroSql]
+            [eventoId, `Registro de ${tipoFinal} - ${estadoFinal} `, `${empleado.nombre} registró ${tipoFinal} `, empleado_id, JSON.stringify({ asistencia_id: id, estado: estadoFinal, tipo: tipoFinal, metodo: metodo ? metodo.toLowerCase() : 'desconocido' }), fechaRegistroSql]
         );
 
         // 7. Aumentar conteo (si es retardo)
@@ -338,16 +370,16 @@ async function registrarAsistenciaEscritorio(req, res) {
         }
 
         broadcast('nueva-asistencia', { id, empleado_id, empleado_nombre: empleado.nombre, estado: estadoFinal, tipo: tipoFinal, fecha: fechaLocal });
-        res.status(201).json({ 
-            success: true, 
-            message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `, 
-            data: { 
-                id, 
-                tipo: tipoFinal, 
+        res.status(201).json({
+            success: true,
+            message: `Asistencia ${tipoFinal} guardada: ${estadoFinal} `,
+            data: {
+                id,
+                tipo: tipoFinal,
                 estado: estadoFinal,
                 fecha_registro: fechaLocal.toISOString(),
                 hora: fechaRegistroSql.split(' ')[1].substring(0, 5)
-            } 
+            }
         });
 
     } catch (error) {

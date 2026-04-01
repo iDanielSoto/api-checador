@@ -401,7 +401,7 @@ export async function getMovilEmpleado(req, res) {
 
         const resultado = await pool.query(`
             SELECT * FROM movil
-            WHERE empleado_id = $1
+            WHERE empleado_id = $1 AND es_activo = true
             ORDER BY fecha_registro DESC
             LIMIT 1
         `, [empleadoId]);

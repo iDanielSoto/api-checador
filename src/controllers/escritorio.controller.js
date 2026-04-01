@@ -22,7 +22,7 @@ export async function getEscritorios(req, res) {
                 e.es_activo,
                 (SELECT COUNT(*) FROM biometrico b WHERE b.escritorio_id = e.id AND b.es_activo = true) as biometricos_count
             FROM escritorio e
-            WHERE e.empresa_id = $1
+            WHERE e.empresa_id = $1 AND e.es_activo = true
         `;
         const params = [req.empresa_id];
 
@@ -72,7 +72,7 @@ export async function getEscritorioById(req, res) {
         const biometricos = await pool.query(`
             SELECT id, nombre, tipo, estado, es_activo
             FROM biometrico
-            WHERE escritorio_id = $1
+            WHERE escritorio_id = $1 AND es_activo = true
         `, [id]);
 
         res.json({
@@ -166,8 +166,8 @@ export async function createEscritorio(req, res) {
                 if (empData.limite_dispositivos !== null) {
                     const conteoRes = await pool.query(`
                         SELECT 
-                            (SELECT COUNT(*) FROM movil m INNER JOIN empleados em ON m.empleado_id = em.id INNER JOIN usuarios u ON em.usuario_id = u.id WHERE u.empresa_id = $1) + 
-                            (SELECT COUNT(*) FROM escritorio e WHERE e.empresa_id = $1)
+                            (SELECT COUNT(*) FROM movil m INNER JOIN empleados em ON m.empleado_id = em.id INNER JOIN usuarios u ON em.usuario_id = u.id WHERE u.empresa_id = $1 AND m.es_activo = true) + 
+                            (SELECT COUNT(*) FROM escritorio e WHERE e.empresa_id = $1 AND e.es_activo = true)
                         as total
                     `, [empresaId]);
 
@@ -304,7 +304,7 @@ export async function deleteEscritorio(req, res) {
         const resultado = await pool.query(`
             UPDATE escritorio SET es_activo = false
             WHERE id = $1 AND es_activo = true AND empresa_id = $2
-            RETURNING id
+            RETURNING id, nombre
         `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
@@ -322,13 +322,14 @@ export async function deleteEscritorio(req, res) {
         `, [id]);
 
         // Registrar evento
+        const { nombre } = resultado.rows[0];
         await registrarEvento({
             titulo: 'Dispositivo de escritorio desactivado',
-            descripcion: `Se desactivó el dispositivo de escritorio ${id}`,
+            descripcion: `Se desactivó el dispositivo de escritorio ${nombre}`,
             tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
             prioridad: PRIORIDADES.ALTA,
             usuario_modificador_id: req.usuario?.id,
-            detalles: { escritorio_id: id, biometricos_desactivados: bioResult.rowCount }
+            detalles: { nombre: nombre, biometricos_desactivados: bioResult.rowCount }
         });
 
         res.json({
@@ -356,7 +357,7 @@ export async function reactivarEscritorio(req, res) {
         const resultado = await pool.query(`
             UPDATE escritorio SET es_activo = true
             WHERE id = $1 AND es_activo = false AND empresa_id = $2
-            RETURNING id
+            RETURNING id, nombre
         `, [id, req.empresa_id]);
 
         if (resultado.rows.length === 0) {
@@ -366,13 +367,15 @@ export async function reactivarEscritorio(req, res) {
             });
         }
 
+        const { nombre } = resultado.rows[0];
+
         await registrarEvento({
             titulo: 'Dispositivo de escritorio reactivado',
-            descripcion: `Se reactivó el dispositivo de escritorio ${id}`,
+            descripcion: `Se reactivó el dispositivo de escritorio ${nombre}`,
             tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
             prioridad: PRIORIDADES.ALTA,
             usuario_modificador_id: req.usuario?.id,
-            detalles: { escritorio_id: id }
+            detalles: { nombre: nombre }
         });
 
         res.json({

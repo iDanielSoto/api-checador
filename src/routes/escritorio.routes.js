@@ -14,11 +14,11 @@ import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
-// Rutas públicas (No requieren token)
-router.get('/public/status/:id', getEscritorioStatusPublico);
-
 router.use(verificarAutenticacion);
 router.use(verificarEmpresa);
+
+// Rutas protegidas (REQUERIAN AUTENTICACIÓN)
+router.get('/status/:id', getEscritorioStatusPublico);
 
 router.get('/', requirePermiso('DISPOSITIVO_VER'), getEscritorios);
 router.get('/:id', requirePermiso('DISPOSITIVO_VER'), getEscritorioById);

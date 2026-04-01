@@ -264,7 +264,7 @@ export async function identificarPorFacial(req, res) {
             try {
                 const descriptorRegistrado = byteaToFloat32Array(cred.facial);
                 const distancia = calcularDistanciaEuclidiana(descriptorRecibido, descriptorRegistrado);
-                console.log(`Comparando con empleado ${cred.empleado_id}: distancia = ${distancia.toFixed(4)}`);
+                
                 if (distancia < mejorDistancia) {
                     mejorDistancia = distancia;
                     mejorMatch = cred;
@@ -276,7 +276,7 @@ export async function identificarPorFacial(req, res) {
 
         if (mejorMatch && mejorDistancia < UMBRAL_DISTANCIA) {
             const matchScore = Math.round((1 - mejorDistancia) * 100);
-            console.log(`✅ Match facial encontrado: empleado ${mejorMatch.empleado_id}, score: ${matchScore}%`);
+            
 
             await registrarEvento({
                 titulo: 'Identificación facial exitosa',
@@ -306,7 +306,7 @@ export async function identificarPorFacial(req, res) {
             });
         }
 
-        console.log(`❌ Sin match facial. Mejor distancia: ${mejorDistancia.toFixed(4)}, umbral: ${UMBRAL_DISTANCIA}`);
+        
         return res.status(404).json({ success: false, message: 'Rostro no reconocido en el sistema' });
 
     } catch (error) {
@@ -344,7 +344,7 @@ export async function verificarFacialPorImagen(req, res) {
         const base64Data = imagen_base64.replace(/^data:image\/\w+;base64,/, '');
         const imageBuffer = Buffer.from(base64Data, 'base64');
 
-        console.log(`🔍 Extrayendo características faciales de imagen para empleado ${empleado_id}...`);
+        
         const descriptorRecibido = await extractDescriptorFromImage(imageBuffer);
 
         if (!descriptorRecibido) {
@@ -355,15 +355,15 @@ export async function verificarFacialPorImagen(req, res) {
         const UMBRAL_DISTANCIA = 0.6;
         const distancia = calcularDistanciaEuclidiana(descriptorRecibido, descriptorRegistrado);
 
-        console.log(`📊 Distancia facial para empleado ${empleado_id}: ${distancia.toFixed(4)} (Umbral: ${UMBRAL_DISTANCIA})`);
+        
 
         if (distancia < UMBRAL_DISTANCIA) {
             const matchScore = Math.round((1 - (distancia / 1.5)) * 100);
-            console.log(`✅ Match facial exitoso.`);
+            
             return res.json({ success: true, message: 'Rostro verificado exitosamente', data: { matchScore, distancia } });
         }
 
-        console.log(`❌ Match facial fallido.`);
+        
         return res.status(400).json({ success: false, message: 'El rostro de la imagen no coincide con el registrado en el sistema' });
 
     } catch (error) {

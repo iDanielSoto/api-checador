@@ -862,7 +862,7 @@ export async function asignarRol(req, res) {
         `, [rol_id, id]);
 
         if (checkRolUser.rows.length === 0) {
-             return res.status(404).json({ success: false, message: 'Usuario o rol no encontrado' });
+            return res.status(404).json({ success: false, message: 'Usuario o rol no encontrado' });
         }
         const usuarioData = checkRolUser.rows[0];
 
@@ -895,7 +895,7 @@ export async function asignarRol(req, res) {
         // Registrar evento
         await registrarEvento({
             titulo: 'Rol asignado a usuario',
-            descripcion: `Se asignó un rol al usuario ${id}`,
+            descripcion: `Se asignó un rol al usuario ${usuarioData.nombre}`,
             tipo_evento: TIPOS_EVENTO.ROL,
             prioridad: PRIORIDADES.MEDIA,
             usuario_modificador_id: req.usuario?.id,

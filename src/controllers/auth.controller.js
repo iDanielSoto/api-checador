@@ -141,7 +141,7 @@ export async function login(req, res) {
 
                 return res.status(401).json({
                     success: false,
-                    message: `Demasiados intentos fallidos. Login bloqueado por ${cooldownStr}.`
+                    message: `Demasiados intentos fallidos. Login bloqueado por ${cooldownStr}.`    
                 });
             } else {
                 // Solo incrementar contador
@@ -610,7 +610,7 @@ export async function hashPassword(password) {
 // POST /api/auth/biometric
 export async function loginBiometrico(req, res) {
     try {
-        const { empleado_id } = req.body;
+        const { empleado_id, metodo } = req.body;
 
         if (!empleado_id) {
             return res.status(400).json({
@@ -673,13 +673,16 @@ export async function loginBiometrico(req, res) {
         }
 
         // Registrar evento de login biométrico
+        const metodoFinal = metodo ? metodo.toLowerCase() : 'huella';
+        const descMetodo = metodoFinal === 'facial' ? 'reconocimiento facial' : (metodoFinal === 'pin' ? 'PIN' : 'huella digital');
+
         await registrarEvento({
-            titulo: 'Inicio de sesión biométrico',
-            descripcion: `${usuarioData.nombre} inició sesión por huella digital`,
+            titulo: `Inicio de sesión ${metodoFinal}`,
+            descripcion: `${usuarioData.nombre} inició sesión por ${descMetodo}`,
             tipo_evento: TIPOS_EVENTO.AUTENTICACION,
             prioridad: PRIORIDADES.BAJA,
             empleado_id: usuarioData.empleado_id,
-            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, metodo: 'biometrico', empresa_id: usuarioData.empresa_id }
+            detalles: { usuario_id: usuarioData.id, usuario: usuarioData.usuario, metodo: metodoFinal, empresa_id: usuarioData.empresa_id }
         });
 
         // Generar JWT

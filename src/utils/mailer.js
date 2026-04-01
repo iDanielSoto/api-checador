@@ -146,7 +146,7 @@ export async function enviarCorreoNuevoAdmin(nombre, correo, empresa_nombre, emp
 `
         };
         const info = await transporter.sendMail(mailOptions);
-        console.log(`Correo enviado a ${correo}: ${info.messageId}`);
+        
         return info;
     } catch (error) {
         console.error('Error al enviar correo de notificación:', error);

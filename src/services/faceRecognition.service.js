@@ -22,17 +22,17 @@ let modelsLoaded = false;
 export async function loadModels() {
     if (modelsLoaded) return;
     try {
-        console.log('[FaceAPI] Inicializando backend CPU...');
+        
         await tf.setBackend('cpu');
         await tf.ready();
-        console.log('[FaceAPI] Cargando modelos...');
+        
         await Promise.all([
             faceapi.nets.tinyFaceDetector.loadFromDisk(MODELS_DIR),
             faceapi.nets.faceLandmark68Net.loadFromDisk(MODELS_DIR),
             faceapi.nets.faceRecognitionNet.loadFromDisk(MODELS_DIR),
         ]);
         modelsLoaded = true;
-        console.log('[FaceAPI] Modelos cargados correctamente ✅');
+        
     } catch (error) {
         console.error('[FaceAPI] Error cargando modelos:', error);
         throw new Error('No se pudieron cargar los modelos de Face API');

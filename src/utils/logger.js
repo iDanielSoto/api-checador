@@ -22,8 +22,6 @@ const logger = winston.createLogger({
     transports: [
         // Escribir todos los logs con nivel `error` o menor a `error.log`
         new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-        // Escribir todos los logs a `combined.log`
-        new winston.transports.File({ filename: 'logs/combined.log' }),
     ],
 });
 

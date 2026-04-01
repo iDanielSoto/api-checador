@@ -18,7 +18,7 @@ const router = Router();
 // Pero en el snippet de movil rutas no lo puso. Lo dejaré sin auth explícito por ahora para seguir el snippet, 
 // o mejor aún, lo comento.
 
-// router.use(verificarAutenticacion);
+router.use(verificarAutenticacion);
 
 // GET  /api/movil/sync/mis-datos?empleado_id=XX
 router.get('/sync/mis-datos', movilSyncController.getMisDatos);

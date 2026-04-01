@@ -167,6 +167,7 @@ export const getMisDatos = async (req, res) => {
 export const sincronizarAsistencias = async (req, res) => {
     try {
         const { registros } = req.body;
+        
 
         if (!registros || !Array.isArray(registros) || registros.length === 0) {
             return res.status(400).json({
@@ -192,7 +193,7 @@ export const sincronizarAsistencias = async (req, res) => {
 
                 // Verificar que el empleado existe y cargar su empresa
                 const empCheck = await pool.query(
-                    'SELECT e.id, u.empresa_id FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1',
+                    'SELECT e.id, u.id as usuario_id, u.empresa_id FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1',
                     [reg.empleado_id]
                 );
 
@@ -291,11 +292,13 @@ export const sincronizarAsistencias = async (req, res) => {
                 // --- Re-evaluación del estado y captura del snapshot horario ---
                 let estadoCalculado = reg.estado || reg.clasificacion || 'pendiente';
                 let horarioSnapshot = null;
+                let toleranciaCalc = null;
 
                 try {
                     const empresaId = empCheck.rows[0].empresa_id;
                     if (empresaId) {
                         const { tolerancia, horario } = await srvBuscarConfiguracion(reg.empleado_id, empresaId);
+                        toleranciaCalc = tolerancia; // Guardar en scope del for-loop
 
                         const fechaSync = new Date(fecha);
                         const minsHora = fechaSync.getHours() * 60 + fechaSync.getMinutes();
@@ -325,14 +328,20 @@ export const sincronizarAsistencias = async (req, res) => {
                 }
 
                 // Generar ID
+                // 1. IP del registro (mover fuera para depurar siempre)
+                const ipReal = reg.ip || 'SIN_IP';
                 const servidor_id = await generateId(ID_PREFIXES.ASISTENCIA);
 
-                // --- Validar segmentos de red para esta asistencia (Usando objeto heredado) ---
+                // --- Validar segmentos de red y GPS para esta asistencia ---
                 let alertasReg = [];
-                if (tolerancia && tolerancia.segmentos_red) {
+
+                // Log preventivo para ver si entramos al flujo
+                
+
+                if (toleranciaCalc) {
                     try {
-                        let segmentosRed = tolerancia.segmentos_red;
-                        
+                        let segmentosRed = toleranciaCalc.segmentos_red || [];
+
                         let coordenadas = null;
                         if (reg.ubicacion && Array.isArray(reg.ubicacion) && reg.ubicacion.length >= 2) {
                             coordenadas = { lat: reg.ubicacion[0], lng: reg.ubicacion[1] };
@@ -343,13 +352,35 @@ export const sincronizarAsistencias = async (req, res) => {
                         let ubicacionDepartamento = null;
                         if (reg.departamento_id) {
                             const deptoQuery = await pool.query(
-                                'SELECT latitud, longitud, radio_metros FROM departamentos WHERE id = $1',
+                                'SELECT ubicacion FROM departamentos WHERE id = $1',
                                 [reg.departamento_id]
                             );
-                            if (deptoQuery.rows.length > 0 && deptoQuery.rows[0].latitud) {
-                                ubicacionDepartamento = deptoQuery.rows[0];
+                            if (deptoQuery.rows.length > 0 && deptoQuery.rows[0].ubicacion) {
+                                ubicacionDepartamento = deptoQuery.rows[0].ubicacion;
                             }
                         }
+
+                        const segsLog = (segmentosRed && segmentosRed.length > 0) ? segmentosRed.join(', ') : 'NINGUNO (Abierto)';
+                        const logGps = coordenadas ? `LatLng(${coordenadas.lat}, ${coordenadas.lng})` : 'SIN_COORDENADAS';
+                        const logDepto = ubicacionDepartamento ? `${ubicacionDepartamento.zonas?.length || 1} geocerca(s)` : 'SIN_UBICACION_DEPARTAMENTO';
+                        
+                        const usuarioId = empCheck.rows[0].usuario_id;
+                        const omitirRed = toleranciaCalc.omision_red_activa && (
+                            toleranciaCalc.omision_red_empleados?.includes('*') || 
+                            toleranciaCalc.omision_red_empleados?.includes(String(reg.empleado_id)) ||
+                            toleranciaCalc.omision_red_empleados?.includes(String(usuarioId))
+                        );
+                        const omitirGps = toleranciaCalc.omision_gps_activa && (
+                            toleranciaCalc.omision_gps_empleados?.includes('*') || 
+                            toleranciaCalc.omision_gps_empleados?.includes(String(reg.empleado_id)) ||
+                            toleranciaCalc.omision_gps_empleados?.includes(String(usuarioId))
+                        );
+
+                        if (omitirRed || omitirGps) {
+                            
+                        }
+
+                        
 
                         const validacion = ejecutarValidacionesRed({
                             ip: reg.ip || null,
@@ -357,12 +388,14 @@ export const sincronizarAsistencias = async (req, res) => {
                             coordenadas,
                             ubicacionDepartamento,
                             wifi: reg.wifi || null,
+                            omitirRed,
+                            omitirGps
                         });
 
                         alertasReg = validacion.alertas;
 
                         if (alertasReg.length > 0) {
-                            console.warn(`⚠️ [movilSync] Alertas de red/gps para ${reg.empleado_id}:`, alertasReg.map(a => a.tipo).join(', '));
+                            console.warn(`[movilSync] RECHAZO PERIMETRO para empleado ${reg.empleado_id}. Fallos detectados:`, alertasReg.map(a => a.tipo).join(', '));
                         }
                     } catch (netErr) {
                         console.error('[movilSync] Error al validar red/gps:', netErr.message);
@@ -415,7 +448,7 @@ export const sincronizarAsistencias = async (req, res) => {
             }
         }
 
-        console.log(`📱 [movilSync] Asistencias: ${sincronizados.length} OK, ${rechazados.length} Error`);
+        
 
         res.json({
             success: true,
@@ -470,7 +503,7 @@ export const sincronizarSesiones = async (req, res) => {
                   AND constraint_type = 'FOREIGN KEY'
             `);
             if (parseInt(fkCheck.rows[0].fk_count) > 0) {
-                console.log('🔧 [movilSync] Migrando sesiones_movil: eliminando foreign keys...');
+                
                 const backup = await pool.query('SELECT * FROM sesiones_movil');
                 await pool.query('DROP TABLE sesiones_movil');
                 await pool.query(`
@@ -492,7 +525,7 @@ export const sincronizarSesiones = async (req, res) => {
                         [row.usuario_id, row.empleado_id, row.tipo, row.modo, row.fecha_evento, row.dispositivo, row.recibido_at]
                     );
                 }
-                console.log(`🔧 [movilSync] Migración completada. ${backup.rows.length} registros restaurados.`);
+                
             }
         } catch (migError) {
             console.error('⚠️ [movilSync] Error en migración FK (no crítico):', migError.message);
@@ -538,7 +571,7 @@ export const sincronizarSesiones = async (req, res) => {
             }
         }
 
-        console.log(`📱 [movilSync] Sesiones: ${sincronizados.length} OK, ${errores.length} Error`);
+        
 
         res.json({
             success: true,

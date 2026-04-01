@@ -24,7 +24,7 @@ export async function getBiometricos(req, res) {
                 e.nombre as escritorio_nombre
             FROM biometrico b
             INNER JOIN escritorio e ON e.id = b.escritorio_id
-            WHERE e.empresa_id = $1
+            WHERE e.empresa_id = $1 AND b.es_activo = true
         `;
         const params = [req.empresa_id];
         let paramIndex = 2;

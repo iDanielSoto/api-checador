@@ -16,9 +16,9 @@ const router = Router();
 router.post('/login', login);
 router.post('/login-saas', loginSaaS);
 router.post('/biometric', loginBiometrico);
-router.post('/logout', logout);
 
 // Rutas protegidas (requieren autenticación)
+router.post('/logout', verificarAutenticacion, logout);
 router.get('/verificar', verificarAutenticacion, verificarSesion);
 router.post('/cambiar-password', verificarAutenticacion, cambiarPassword);
 router.post('/impersonate', verificarAutenticacion, impersonarEmpresa);

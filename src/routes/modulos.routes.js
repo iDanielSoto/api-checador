@@ -13,7 +13,7 @@ import { verificarAutenticacion, autenticacionOpcional } from '../middleware/aut
 const router = Router();
 
 // Rutas públicas (para el menú, filtra según permisos del usuario)
-router.get('/menu', autenticacionOpcional, getModulosMenu);
+router.get('/menu', verificarAutenticacion, getModulosMenu);
 
 // Rutas con autenticación básica
 router.get('/', verificarAutenticacion, getModulos);

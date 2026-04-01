@@ -46,7 +46,7 @@ export async function getConfiguracion(req, res) {
         }
 
         const configData = resultado.rows[0];
-        console.log('[API Backend] empresa_id:', empresaId, '| orden_credenciales raw:', configData.orden_credenciales);
+        
 
         // Parsear orden_credenciales si viene como string, o aplicar fallback si es null
         if (!configData.orden_credenciales) {
@@ -127,7 +127,7 @@ export async function getConfiguracionById(req, res) {
 export async function updateConfiguracion(req, res) {
     try {
         const { id } = req.params;
-        console.log('DEBUG: Actualizando Configuración ID:', id, req.body);
+        
         const {
             idioma,
             es_mantenimiento,
@@ -140,7 +140,11 @@ export async function updateConfiguracion(req, res) {
             segmentos_red,
             intervalo_bloques_minutos,
             requiere_salida,
-            cooldown_bloqueo
+            cooldown_bloqueo,
+            omision_red_activa,
+            omision_red_empleados,
+            omision_gps_activa,
+            omision_gps_empleados
         } = req.body;
 
         // Si orden_credenciales llega como string ya serializado, parsear primero
@@ -164,6 +168,8 @@ export async function updateConfiguracion(req, res) {
         const paletaJson = paleta_colores ? JSON.stringify(paleta_colores) : null;
         const ordenJson = ordenNorm ? JSON.stringify(ordenNorm) : null;
         const segmentosJson = segmentos_red ? JSON.stringify(segmentos_red) : null;
+        const omisionRedJson = omision_red_empleados ? JSON.stringify(omision_red_empleados) : '[]';
+        const omisionGpsJson = omision_gps_empleados ? JSON.stringify(omision_gps_empleados) : '[]';
 
         const resultado = await pool.query(`
             UPDATE configuraciones SET
@@ -178,7 +184,11 @@ export async function updateConfiguracion(req, res) {
                 segmentos_red = $9,
                 intervalo_bloques_minutos = $11,
                 requiere_salida = $12,
-                cooldown_bloqueo = $13
+                cooldown_bloqueo = $13,
+                omision_red_activa = $14,
+                omision_red_empleados = $15,
+                omision_gps_activa = $16,
+                omision_gps_empleados = $17
             WHERE id = $10
             RETURNING *
         `, [
@@ -194,7 +204,11 @@ export async function updateConfiguracion(req, res) {
             id,
             intervalo_bloques_minutos ?? 60,
             requiere_salida ?? true,
-            cooldown_bloqueo ?? 1800
+            cooldown_bloqueo ?? 1800,
+            omision_red_activa ?? false,
+            omisionRedJson,
+            omision_gps_activa ?? false,
+            omisionGpsJson
         ]);
 
         if (resultado.rows.length === 0) {

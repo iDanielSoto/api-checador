@@ -50,9 +50,19 @@ export function ipEnCIDR(ip, cidr) {
  */
 export function extraerIPv4(ipString) {
     if (!ipString) return null;
-    const partes = ipString.split(/[,\s]+/);
+
+    // Manejar formato ::ffff:192.168.1.1 (IPv6-mapped IPv4)
+    let cleanIp = ipString.trim();
+    if (cleanIp.startsWith('::ffff:')) {
+        cleanIp = cleanIp.substring(7);
+    }
+
+    const partes = cleanIp.split(/[,\s]+/);
     const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    return partes.find(p => ipv4Regex.test(p.trim())) || null;
+    
+    // Buscar la primera dirección que parezca IPv4 válida
+    const found = partes.find(p => ipv4Regex.test(p.trim()));
+    return found ? found.trim() : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,39 +127,85 @@ export function validarSegmentoRed(ip, segmentosRed) {
 // ---------------------------------------------------------------------------
 
 /**
- * Evalúa si unas coordenadas GPS están dentro del radio de un departamento.
- * El móvil debe enviar { lat, lng } y el departamento debe tener
- * { latitud, longitud, radio_metros } en su columna `ubicacion`.
- *
- * Por ahora solo construye la estructura de advertencia; la lógica real
- * se implementará cuando el app móvil envíe las coordenadas.
+ * Evalúa si unas coordenadas GPS están dentro de las zonas permitidas para un departamento.
+ * Soporta geocercas circulares y poligonales (Ray Casting).
  *
  * @param {{ lat: number, lng: number }|null} coordenadasDispositivo
- * @param {{ latitud: number, longitud: number, radio_metros: number }|null} ubicacionDepartamento
+ * @param {object|null} ubicacionDepartamento - Objeto con 'zonas' o estructura plana { latitud, longitud, radio_metros }
  * @returns {{ valido: boolean, advertencia: object|null }}
  */
 export function validarGPS(coordenadasDispositivo, ubicacionDepartamento) {
-    // Sin datos suficientes, no se puede validar → no se genera error
-    if (!coordenadasDispositivo || !ubicacionDepartamento?.latitud) {
+    // Sin datos suficientes o sin ubicación configurada, no se puede validar → no se genera error
+    if (!coordenadasDispositivo || !ubicacionDepartamento) {
         return { valido: true, advertencia: null };
     }
 
     const { lat, lng } = coordenadasDispositivo;
-    const { latitud, longitud, radio_metros = 200 } = ubicacionDepartamento;
 
-    const distancia = haversineMetros(lat, lng, latitud, longitud);
+    // 1. Normalizar las zonas a evaluar
+    // Caso A: Objeto con array de zonas (Formato completo de la BD)
+    // Caso B: Objeto de una sola zona (Aislado)
+    // Caso C: Estructura plana (Retrocompatibilidad)
+    let zonas = [];
 
-    if (distancia <= radio_metros) {
+    if (Array.isArray(ubicacionDepartamento.zonas)) {
+        zonas = ubicacionDepartamento.zonas;
+    } else if (ubicacionDepartamento.type) {
+        zonas = [ubicacionDepartamento];
+    } else if (ubicacionDepartamento.latitud || ubicacionDepartamento.center) {
+        // Mocking zone object for old flat structure or partials
+        zonas = [{
+            type: 'circle',
+            center: [ubicacionDepartamento.latitud || ubicacionDepartamento.center[0], ubicacionDepartamento.longitud || ubicacionDepartamento.center[1]],
+            radius: ubicacionDepartamento.radio_metros || ubicacionDepartamento.radius || 200
+        }];
+    }
+
+    if (zonas.length === 0) {
         return { valido: true, advertencia: null };
     }
 
+    // 2. Comprobar si está en AL MENOS una zona (OR lógico)
+    let enCualquierZona = false;
+    let distanciaMasCercana = Infinity;
+
+    for (const [index, zona] of zonas.entries()) {
+        if (zona.type === 'circle' && zona.center) {
+            const d = haversineMetros(lat, lng, zona.center[0], zona.center[1]);
+            const radio = zona.radius || 200;
+            if (d <= radio) {
+                enCualquierZona = true;
+                
+                break;
+            }
+            distanciaMasCercana = Math.min(distanciaMasCercana, d);
+        } else if (zona.type === 'polygon' && Array.isArray(zona.coordinates)) {
+            
+            if (puntoEnPoligono(lat, lng, zona.coordinates)) {
+                enCualquierZona = true;
+                
+                break;
+            }
+        }
+    }
+
+    if (enCualquierZona) {
+        return { valido: true, advertencia: null };
+    }
+
+    // Si falló, generar advertencia
     return {
         valido: false,
         advertencia: {
             tipo: 'gps_fuera_zona',
             severidad: 'alta',
-            mensaje: `El dispositivo está a ${Math.round(distancia)}m del punto autorizado (radio: ${radio_metros}m)`,
-            detalle: { lat, lng, distancia_metros: Math.round(distancia), radio_metros }
+            mensaje: `El dispositivo se encuentra fuera de todas las geocercas autorizadas para este departamento`,
+            detalle: {
+                lat,
+                lng,
+                zonas_evaluadas: zonas.length,
+                distancia_minima: distanciaMasCercana !== Infinity ? Math.round(distanciaMasCercana) : null
+            }
         }
     };
 }
@@ -216,22 +272,30 @@ export function ejecutarValidacionesRed({
     coordenadas = null,
     ubicacionDepartamento = null,
     wifi = null,
-    redesWifiAutorizadas = []
+    redesWifiAutorizadas = [],
+    omitirRed = false,
+    omitirGps = false
 } = {}) {
     const alertas = [];
 
-    const redResult = validarSegmentoRed(ip, segmentosRed);
-    if (redResult.advertencia) alertas.push(redResult.advertencia);
+    let redValida = true;
+    if (!omitirRed) {
+        const redResult = validarSegmentoRed(ip, segmentosRed);
+        if (redResult.advertencia) alertas.push(redResult.advertencia);
+        redValida = redResult.valido;
+    }
 
-    const gpsResult = validarGPS(coordenadas, ubicacionDepartamento);
-    if (gpsResult.advertencia) alertas.push(gpsResult.advertencia);
+    if (!omitirGps) {
+        const gpsResult = validarGPS(coordenadas, ubicacionDepartamento);
+        if (gpsResult.advertencia) alertas.push(gpsResult.advertencia);
+    }
 
     const wifiResult = validarWifi(wifi, redesWifiAutorizadas);
     if (wifiResult.advertencia) alertas.push(wifiResult.advertencia);
 
     return {
         alertas,
-        fueraDeRed: !redResult.valido
+        fueraDeRed: !redValida
     };
 }
 
@@ -248,4 +312,26 @@ function haversineMetros(lat1, lon1, lat2, lon2) {
         Math.sin(dLat / 2) ** 2 +
         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Algoritmo de Ray Casting (Point-In-Polygon)
+ * @param {number} lat - Latitud a probar
+ * @param {number} lng - Longitud a probar
+ * @param {Array<[number, number]>} vertices - Array de arrays [lat, lng]
+ * @returns {boolean}
+ */
+function puntoEnPoligono(lat, lng, vertices) {
+    let inside = false;
+    // vs is an array of [lat, lng]
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i][0], yi = vertices[i][1];
+        const xj = vertices[j][0], yj = vertices[j][1];
+        
+        const intersect = ((yi > lng) !== (yj > lng))
+            && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+            
+        if (intersect) inside = !inside;
+    }
+    return inside;
 }

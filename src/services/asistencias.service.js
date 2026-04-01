@@ -25,7 +25,9 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
                t.minutos_anticipo_salida, t.minutos_posterior_salida,
                c.segmentos_red, 
                COALESCE(c.intervalo_bloques_minutos, 60) as intervalo_bloques_minutos,
-               c.requiere_salida
+               c.requiere_salida,
+               c.omision_red_activa, c.omision_red_empleados,
+               c.omision_gps_activa, c.omision_gps_empleados
         FROM tolerancias t
         INNER JOIN configuraciones c ON c.tolerancia_id = t.id
         WHERE c.id = (SELECT configuracion_id FROM empresas WHERE id = $1)
@@ -44,17 +46,58 @@ export async function srvBuscarConfiguracion(empleadoId, empresaId) {
         segmentos_red: '[]',
         intervalo_bloques_minutos: 60,
         dias_aplica: '{}',
-        requiere_salida: true
+        requiere_salida: true,
+        omision_red_activa: false,
+        omision_red_empleados: '[]',
+        omision_gps_activa: false,
+        omision_gps_empleados: '[]'
     };
 
-    let reglas = typeof configuracion.reglas === 'string' ? JSON.parse(configuracion.reglas) : configuracion.reglas;
-    let red = typeof configuracion.segmentos_red === 'string' ? JSON.parse(configuracion.segmentos_red) : configuracion.segmentos_red;
-    let horario = typeof empleado.horario_json === 'string' ? JSON.parse(empleado.horario_json) : (empleado.horario_json || null);
-    let diasAplica = typeof configuracion.dias_aplica === 'string' ? JSON.parse(configuracion.dias_aplica) : (configuracion.dias_aplica || {});
+    let reglas = configuracion.reglas;
+    if (typeof reglas === 'string') {
+        try { reglas = JSON.parse(reglas); } catch (e) { reglas = []; }
+    }
+
+    let red = configuracion.segmentos_red;
+    if (typeof red === 'string') {
+        try {
+            red = JSON.parse(red);
+        } catch (e) {
+            red = red.replace(/^\{|\}$/g, '').split(',').map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+        }
+    }
+    if (!Array.isArray(red)) red = [];
+
+    let horario = empleado.horario_json || null;
+    if (typeof horario === 'string') {
+        try { horario = JSON.parse(horario); } catch (e) { horario = null; }
+    }
+
+    let diasAplica = configuracion.dias_aplica || {};
+    if (typeof diasAplica === 'string') {
+        try { diasAplica = JSON.parse(diasAplica); } catch (e) { diasAplica = {}; }
+    }
+
+    let omisionRedEmps = configuracion.omision_red_empleados || [];
+    if (typeof omisionRedEmps === 'string') {
+        try { omisionRedEmps = JSON.parse(omisionRedEmps); } catch (e) { omisionRedEmps = []; }
+    }
+
+    let omisionGpsEmps = configuracion.omision_gps_empleados || [];
+    if (typeof omisionGpsEmps === 'string') {
+        try { omisionGpsEmps = JSON.parse(omisionGpsEmps); } catch (e) { omisionGpsEmps = []; }
+    }
 
     return {
         empleado,
-        tolerancia: { ...configuracion, reglas, segmentos_red: red, dias_aplica: diasAplica },
+        tolerancia: { 
+            ...configuracion, 
+            reglas, 
+            segmentos_red: red, 
+            dias_aplica: diasAplica,
+            omision_red_empleados: omisionRedEmps,
+            omision_gps_empleados: omisionGpsEmps
+        },
         horario
     };
 }

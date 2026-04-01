@@ -76,6 +76,9 @@ export async function createDepartamento(req, res) {
 
         res.status(201).json({ success: true, message: 'Departamento creado', data: resultado.rows[0] });
     } catch (error) {
+        if (error.code === '23505') {
+            return res.status(400).json({ success: false, message: 'Ya existe un departamento con ese nombre en esta empresa' });
+        }
         console.error('Error en createDepartamento:', error);
         res.status(500).json({ success: false, message: 'Error al crear departamento' });
     }
@@ -117,6 +120,9 @@ export async function updateDepartamento(req, res) {
 
         res.json({ success: true, message: 'Departamento actualizado', data: resultado.rows[0] });
     } catch (error) {
+        if (error.code === '23505') {
+            return res.status(400).json({ success: false, message: 'Ya existe un departamento con ese nombre en esta empresa' });
+        }
         console.error('Error en updateDepartamento:', error);
         res.status(500).json({ success: false, message: 'Error al actualizar departamento' });
     }

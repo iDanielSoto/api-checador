@@ -18,15 +18,15 @@ import { requirePermiso } from '../middleware/permissions.middleware.js';
 
 const router = Router();
 
-// SSE stream (usa token por query param porque EventSource no soporta headers)
-router.get('/stream', streamSolicitudes);
+// SSE stream (usa token por query param o header)
+router.get('/stream', verificarAutenticacion, streamSolicitudes);
 
-// Rutas públicas (dispositivos sin autenticación)
-router.post('/validar-afiliacion', validarAfiliacion); // Validar afiliación y red
-router.post('/', createSolicitud);  // Crear solicitud desde dispositivo
-router.delete('/:id', cancelarSolicitud);  // Cancelar solicitud por el usuario
-router.get('/verificar/:token', verificarSolicitud);  // Verificar estado por token
-router.patch('/:id/pendiente', actualizarAPendiente);  // Reabrir solicitud rechazada
+// Rutas protegidas (REQUERIAN AUTENTICACIÓN)
+router.post('/validar-afiliacion', verificarAutenticacion, validarAfiliacion); // Validar afiliación y red
+router.post('/', createSolicitud);  // Crear solicitud (el controlador debe manejar la auth o usar middleware)
+router.delete('/:id', verificarAutenticacion, cancelarSolicitud);  // Cancelar solicitud
+router.get('/verificar/:token', verificarAutenticacion, verificarSolicitud);  // Verificar estado
+router.patch('/:id/pendiente', verificarAutenticacion, actualizarAPendiente);  // Reabrir solicitud
 
 // Rutas protegidas (requieren autenticación + contexto de empresa)
 router.get('/', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_VER'), getSolicitudes);

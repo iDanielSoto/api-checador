@@ -12,12 +12,12 @@ import { verificarEmpresa } from '../middleware/tenant.middleware.js';
 
 const router = Router();
 
-// Rutas públicas (sin autenticación)
-router.get('/publicos', getAvisosPublicos);
-
 // Todas las rutas siguientes requieren autenticación y contexto de empresa
 router.use(verificarAutenticacion);
 router.use(verificarEmpresa);
+
+// Rutas protegidas (REQUERIAN AUTENTICACIÓN)
+router.get('/publicos', getAvisosPublicos);
 
 // Rutas para administración
 router.get('/', getAllAvisos);

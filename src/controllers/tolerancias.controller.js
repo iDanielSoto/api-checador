@@ -194,7 +194,7 @@ export async function updateTolerancia(req, res) {
 
     try {
         const { id } = req.params;
-        console.log('DEBUG: Actualizando Tolerancias ID:', id, req.body);
+        
         const {
             nombre,
             reglas,

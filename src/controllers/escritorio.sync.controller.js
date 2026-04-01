@@ -9,7 +9,7 @@ export async function getDatosReferencia(req, res) {
     const { desde, escritorio_id } = req.query; // Parámetros opcionales
     const esSyncCompleto = !desde;
 
-    console.log(`[Sync] Obteniendo datos de referencia ${esSyncCompleto ? '(completo)' : '(incremental)'}${escritorio_id ? ` para escritorio ${escritorio_id}` : ''}`);
+    
 
     // Consultar empleados activos (incluye usuario y correo para búsqueda offline)
     const empleadosQuery = `
@@ -111,7 +111,7 @@ export async function getDatosReferencia(req, res) {
       timestamp
     });
 
-    console.log(`[Sync] ✅ Datos de referencia enviados: ${empleados.rows.length} empleados, ${horarios.rows.length} horarios, ${credenciales.rows.length} credenciales, ${escritorios.rows.length} escritorios, ${biometricos.rows.length} biométricos`);
+    
 
   } catch (error) {
     console.error('[Sync] ❌ Error obteniendo datos de referencia:', error);
@@ -135,7 +135,7 @@ export async function sincronizarAsistenciasPendientes(req, res) {
       });
     }
 
-    console.log(`[Sync] Procesando ${registros.length} asistencias pendientes...`);
+    
 
     const sincronizados = [];
     const rechazados = [];
@@ -247,7 +247,7 @@ export async function sincronizarAsistenciasPendientes(req, res) {
           fecha_servidor: fecha_registro.toISOString()
         });
 
-        console.log(`[Sync] ✅ Asistencia sincronizada: ${registro.id} → ${servidor_id}`);
+        
 
       } catch (error) {
         console.error(`[Sync] ❌ Error procesando registro ${registro.id}:`, error);
@@ -266,7 +266,7 @@ export async function sincronizarAsistenciasPendientes(req, res) {
       rechazados
     });
 
-    console.log(`[Sync] ✅ Sincronización completada: ${sincronizados.length} éxitos, ${rechazados.length} rechazados`);
+    
 
   } catch (error) {
     console.error('[Sync] ❌ Error en sincronización de asistencias:', error);
