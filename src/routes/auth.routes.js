@@ -6,7 +6,8 @@ import {
     verificarSesion,
     cambiarPassword,
     loginBiometrico,
-    impersonarEmpresa
+    impersonarEmpresa,
+    tokenKiosco
 } from '../controllers/auth.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 
@@ -16,6 +17,7 @@ const router = Router();
 router.post('/login', login);
 router.post('/login-saas', loginSaaS);
 router.post('/biometric', loginBiometrico);
+router.post('/token-kiosco', tokenKiosco);
 
 // Rutas protegidas (requieren autenticación)
 router.post('/logout', verificarAutenticacion, logout);

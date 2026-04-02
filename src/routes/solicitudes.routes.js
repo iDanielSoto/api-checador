@@ -25,7 +25,7 @@ router.get('/stream', verificarAutenticacion, streamSolicitudes);
 router.post('/validar-afiliacion', verificarAutenticacion, validarAfiliacion); // Validar afiliación y red
 router.post('/', createSolicitud);  // Crear solicitud (el controlador debe manejar la auth o usar middleware)
 router.delete('/:id', verificarAutenticacion, cancelarSolicitud);  // Cancelar solicitud
-router.get('/verificar/:token', verificarAutenticacion, verificarSolicitud);  // Verificar estado
+router.get('/verificar/:token', verificarSolicitud);  // Verificar estado
 router.patch('/:id/pendiente', verificarAutenticacion, actualizarAPendiente);  // Reabrir solicitud
 
 // Rutas protegidas (requieren autenticación + contexto de empresa)

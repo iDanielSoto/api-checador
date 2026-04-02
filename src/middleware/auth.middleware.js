@@ -95,9 +95,34 @@ export async function verificarAutenticacion(req, res, next) {
         `, [userId]);
 
         if (resultado.rows.length === 0) {
+            // Intentar verificar como dispositivo escritorio (Kiosko)
+            const resEscritorio = await pool.query(`
+                SELECT id, nombre, empresa_id, es_activo
+                FROM escritorio
+                WHERE id = $1 AND es_activo = true
+            `, [userId]);
+
+            if (resEscritorio.rows.length > 0) {
+                const escritorio = resEscritorio.rows[0];
+                req.usuario = {
+                    id: escritorio.id,
+                    usuario: 'SISTEMA_ESCRITORIO',
+                    nombre: escritorio.nombre,
+                    es_empleado: false,
+                    empleado_id: null,
+                    empresa_id: escritorio.empresa_id,
+                    esAdmin: false,
+                    roles: [{ nombre: 'Kiosko', es_admin: false, posicion: 0 }],
+                    permisos: '1',
+                    permisosBigInt: BigInt(1)
+                };
+                req.empresa_id = escritorio.empresa_id;
+                return next();
+            }
+
             return res.status(401).json({
                 success: false,
-                message: 'Sesión inválida o usuario no encontrado'
+                message: 'Sesión inválida o dispositivo no encontrado'
             });
         }
 

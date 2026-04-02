@@ -1,4 +1,5 @@
 import { pool } from '../config/db.js';
+import jwt from 'jsonwebtoken';
 import { generateId, generateToken, ID_PREFIXES } from '../utils/idGenerator.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 import { addClient, broadcast } from '../utils/sse.js';
@@ -229,7 +230,8 @@ export async function createSolicitud(req, res) {
             empresa_id,
             identificador, // Aceptar identificador slug
             observaciones,
-            dispositivos_temp
+            dispositivos_temp,
+            installToken // Token mágico de pre-autorización
         } = req.body;
 
         const ipString = Array.isArray(ip) ? ip.join(', ') : ip;
@@ -244,8 +246,34 @@ export async function createSolicitud(req, res) {
 
         let empresaIdFinal = empresa_id;
 
-        // PRIORIDAD: Si viene identificador (slug), buscar el ID real
-        if (identificador) {
+        // --- VALIDACIÓN DE TOKEN MÁGICO (OBLIGATORIO PARA ESCRITORIO) ---
+        if (tipo === 'escritorio') {
+            if (!installToken) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Se requiere un token de instalación válido para registrar este dispositivo'
+                });
+            }
+
+            try {
+                const decoded = jwt.verify(installToken, process.env.JWT_SECRET || 'default_secret');
+                if (decoded.empresa_id) {
+                    empresaIdFinal = decoded.empresa_id;
+                    console.log(`🔐 Solicitud autorizada vía Token Mágico para empresa: ${empresaIdFinal}`);
+                } else {
+                    throw new Error('Token no contiene empresa_id');
+                }
+            } catch (err) {
+                console.error('❌ Error validando installToken:', err.message);
+                return res.status(401).json({
+                    success: false,
+                    message: 'Token de instalación inválido o expirado'
+                });
+            }
+        }
+
+        // PRIORIDAD: Si viene identificador (slug) y no tenemos empresaIdFinal aún
+        if (!empresaIdFinal && identificador) {
             const resEmp = await pool.query('SELECT id FROM empresas WHERE identificador = $1', [identificador]);
             if (resEmp.rows.length > 0) {
                 empresaIdFinal = resEmp.rows[0].id;
@@ -703,7 +731,26 @@ export async function verificarSolicitud(req, res) {
                 [solicitud.mac]
             );
             if (escritorio.rows.length > 0) {
-                responseData.escritorio_id = escritorio.rows[0].id;
+                const escritorioId = escritorio.rows[0].id;
+                responseData.escritorio_id = escritorioId;
+
+                // Generar Token de Acceso para el Escritorio (365 días)
+                // Usamos un payload compatible con el middleware de autenticación
+                const payload = {
+                    sub: escritorioId,
+                    usuario: 'SISTEMA_ESCRITORIO',
+                    empresa_id: solicitud.empresa_id,
+                    esAdmin: false,
+                    roles: ['Kiosko']
+                };
+
+                responseData.auth_token = jwt.sign(
+                    payload,
+                    process.env.JWT_SECRET || 'default_secret',
+                    { expiresIn: '365d' }
+                );
+                
+                console.log(`✅ Token generado para escritorio afiliado: ${escritorioId}`);
             }
         }
 

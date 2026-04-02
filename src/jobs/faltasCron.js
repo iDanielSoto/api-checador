@@ -13,7 +13,7 @@ import { requestContext } from '../utils/context.js';
 export function iniciarCronFaltas() {
     // Min Hour DayMonth Month DayWeek
     // 00  00   *        *     1-5 (lunes a viernes)
-    cron.schedule('53 23 * * *', async () => {
+    cron.schedule('59 23 * * *', async () => {
         logger.info(`[CRON FALTAS] Iniciando revisión de faltas - ${new Date().toLocaleString()}`);
         try {
             await registrarFaltasDelDia();
@@ -24,7 +24,7 @@ export function iniciarCronFaltas() {
         timezone: 'America/Mexico_City'
     });
 
-    logger.info('[CRON FALTAS] Programado: todos los días a las 23:53 (America/Mexico_City)');
+    logger.info('[CRON FALTAS] Programado: todos los días a las 23:59 (America/Mexico_City)');
 }
 
 async function registrarFaltasDelDia() {

@@ -732,3 +732,88 @@ export async function loginBiometrico(req, res) {
         res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
 }
+
+/**
+ * POST /api/auth/token-kiosco
+ * Obtiene un token de acceso para un kiosco basado en el identificador único de la empresa
+ */
+export async function tokenKiosco(req, res) {
+    try {
+        const { identificador } = req.body;
+
+        if (!identificador) {
+            return res.status(400).json({
+                success: false,
+                message: 'El identificador de la empresa es requerido'
+            });
+        }
+
+        // Buscar empresa por identificador
+        const resultado = await pool.query(`
+            SELECT id, nombre, identificador, es_activo, configuracion_id
+            FROM empresas 
+            WHERE identificador = $1
+        `, [identificador]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No se encontró la empresa con ese identificador'
+            });
+        }
+
+        const empresaData = resultado.rows[0];
+
+        if (!empresaData.es_activo) {
+            return res.status(403).json({
+                success: false,
+                message: 'La empresa se encuentra inactiva'
+            });
+        }
+
+        // Registrar evento de login de kiosco
+        await registrarEvento({
+            titulo: 'Inicio de sesión Kiosco',
+            descripcion: `Conexión autorizada para kiosco de ${empresaData.nombre} (${identificador})`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.BAJA,
+            detalles: { identificador, empresa_id: empresaData.id }
+        });
+
+        // Generar JWT con permisos generales de asistencia
+        // Usamos un ID de sujeto especial para identificar que es un sistema automatizado
+        const token = jwt.sign(
+            {
+                sub: `KIOSKO_${identificador}`,
+                usuario: 'KIOSKO_SYSTEM',
+                empresa_id: empresaData.id,
+                esAdmin: false,
+                roles: ['Kiosko'],
+                // Permisos básicos para operar (registro de asistencia)
+                permisos: '1' // Por ejemplo, un bit de "solo checar"
+            },
+            process.env.JWT_SECRET || 'default_secret',
+            { expiresIn: '365d' } // Los kioscos suelen tener sesiones muy largas
+        );
+
+        res.json({
+            success: true,
+            message: 'Conexión de kiosco exitosa',
+            data: {
+                empresa: {
+                    id: empresaData.id,
+                    nombre: empresaData.nombre,
+                    identificador: empresaData.identificador
+                },
+                token: token
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en tokenKiosco:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error interno del servidor al generar token de kiosco'
+        });
+    }
+}
