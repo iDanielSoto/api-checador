@@ -70,6 +70,7 @@ export async function verificarAutenticacion(req, res, next) {
         // Soporta JWT (nuevo) y userId directo (legacy)
         // ==========================================
         let jwtPayload = null;
+        let userId;
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret');
             userId = decoded.sub;
