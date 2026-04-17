@@ -18,18 +18,18 @@ const router = Router();
 // Pero en el snippet de movil rutas no lo puso. Lo dejaré sin auth explícito por ahora para seguir el snippet, 
 // o mejor aún, lo comento.
 
-router.use(verificarAutenticacion);
-
+// Rutas Públicas
 // GET  /api/movil/sync/mis-datos?empleado_id=XX
 router.get('/sync/mis-datos', movilSyncController.getMisDatos);
 
-// POST /api/movil/sync/asistencias
-router.post('/sync/asistencias', movilSyncController.sincronizarAsistencias);
-
-// POST /api/movil/sync/sesiones
-router.post('/sync/sesiones', movilSyncController.sincronizarSesiones);
-
 // GET /api/movil/sync/dispositivos/:empleadoId (Público)
 router.get('/sync/dispositivos/:empleadoId', movilSyncController.verificarDispositivosEmpleado);
+
+// Rutas Protegidas
+// POST /api/movil/sync/asistencias
+router.post('/sync/asistencias', verificarAutenticacion, movilSyncController.sincronizarAsistencias);
+
+// POST /api/movil/sync/sesiones
+router.post('/sync/sesiones', verificarAutenticacion, movilSyncController.sincronizarSesiones);
 
 export default router;
