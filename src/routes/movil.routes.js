@@ -23,8 +23,9 @@ router.get('/empleado/:empleadoId', requirePermisoOrSelf('empleadoId', 'DISPOSIT
 router.get('/', requirePermiso('DISPOSITIVO_VER'), getMoviles);
 router.get('/:id', requirePermiso('DISPOSITIVO_VER'), getMovilById);
 router.post('/', requirePermiso('DISPOSITIVO_CREAR'), createMovil);
-router.put('/:id', requirePermiso('DISPOSITIVO_MODIFICAR'), updateMovil);
-router.delete('/:id', requirePermiso('DISPOSITIVO_MODIFICAR'), deleteMovil);
-router.patch('/:id/reactivar', requirePermiso('DISPOSITIVO_MODIFICAR'), reactivarMovil);
+router.put('/:id', requirePermiso('DISPOSITIVO_EDITAR'), updateMovil);
+router.delete('/:id', requirePermiso('DISPOSITIVO_EDITAR'), deleteMovil);
+router.patch('/:id/reactivar', requirePermiso('DISPOSITIVO_EDITAR'), reactivarMovil);
 
 export default router;
+

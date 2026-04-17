@@ -24,9 +24,10 @@ router.post('/sincronizar', requirePermiso('HORARIO_CREAR'), sincronizarDiasFest
 router.post('/', requirePermiso('HORARIO_CREAR'), createDiaFestivo);
 
 // PUT /api/dias-festivos/:id - Actualizar día festivo
-router.put('/:id', requirePermiso('HORARIO_MODIFICAR'), updateDiaFestivo);
+router.put('/:id', requirePermiso('HORARIO_EDITAR'), updateDiaFestivo);
 
 // DELETE /api/dias-festivos/:id - Desactivar día festivo
-router.delete('/:id', requirePermiso('HORARIO_SOFTDELETE'), deleteDiaFestivo);
+router.delete('/:id', requirePermiso('HORARIO_ELIMINAR'), deleteDiaFestivo);
 
 export default router;
+

@@ -26,3 +26,4 @@ router.post('/cambiar-password', verificarAutenticacion, cambiarPassword);
 router.post('/impersonate', verificarAutenticacion, impersonarEmpresa);
 
 export default router;
+

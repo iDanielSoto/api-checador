@@ -31,3 +31,4 @@ router.post('/registrar', registrarAsistencia);  // Cualquier usuario autenticad
 router.post('/manual', requirePermiso('REGISTRO_VER'), registrarAsistenciaManual);
 
 export default router;
+

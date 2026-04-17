@@ -30,9 +30,9 @@ router.patch('/:id/pendiente', verificarAutenticacion, actualizarAPendiente);  /
 
 // Rutas protegidas (requieren autenticación + contexto de empresa)
 router.get('/', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_VER'), getSolicitudes);
-router.get('/pendientes', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), getSolicitudesPendientes);
-router.patch('/:id/aceptar', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), aceptarSolicitud);
-router.patch('/:id/rechazar', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD'), rechazarSolicitud);
+router.get('/pendientes', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_GESTIONAR'), getSolicitudesPendientes);
+router.patch('/:id/aceptar', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_GESTIONAR'), aceptarSolicitud);
+router.patch('/:id/rechazar', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_GESTIONAR'), rechazarSolicitud);
 router.get('/:id', verificarAutenticacion, verificarEmpresa, requirePermiso('DISPOSITIVO_VER'), getSolicitudById);
 
 export default router;

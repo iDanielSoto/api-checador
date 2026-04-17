@@ -3,7 +3,7 @@
  * Verifica que el usuario tenga los permisos necesarios para acceder a recursos
  */
 
-import { tienePermiso, esSuperAdmin, PERMISOS } from '../utils/permissions.js';
+import { tienePermiso, PERMISOS, esMaestro, JERARQUIA_CONFIGURACION } from '../utils/permissions.js';
 
 /**
  * Crea un middleware que verifica uno o más permisos
@@ -34,8 +34,8 @@ export function requirePermiso(...permisosRequeridos) {
 
         const permisosBitwise = req.usuario.permisosBigInt || BigInt(0);
 
-        // Si es super admin, tiene acceso a todo
-        if (esSuperAdmin(permisosBitwise)) {
+        // Si es dueño del sistema o administrador maestro, tiene acceso a todo
+        if (esMaestro(req.usuario) || req.usuario.esAdmin) {
             return next();
         }
 
@@ -43,9 +43,20 @@ export function requirePermiso(...permisosRequeridos) {
 
         // Verificar cada permiso requerido (OR)
         for (const permiso of permisosRequeridos) {
+            const codigo = typeof permiso === 'string' ? permiso : Object.keys(PERMISOS).find(k => PERMISOS[k] === permiso);
             const bitPosition = typeof permiso === 'string' ? PERMISOS[permiso] : permiso;
 
             if (bitPosition !== undefined && tienePermiso(permisosBitwise, bitPosition)) {
+                // Si es un permiso de CONFIG, validar también la JERARQUIA
+                if (codigo && codigo.startsWith('CONFIG_')) {
+                    const rangoRequerido = JERARQUIA_CONFIGURACION[codigo];
+                    const mejorPosicion = req.usuario.mejorPosicion || 999;
+
+                    if (rangoRequerido !== undefined && mejorPosicion > rangoRequerido) {
+                        // El usuario TIENE EL BIT, pero NO tiene la jerarquía requerida
+                        continue; 
+                    }
+                }
                 return next();
             }
         }
@@ -78,8 +89,8 @@ export function requireAllPermisos(...permisosRequeridos) {
 
         const permisosBitwise = req.usuario.permisosBigInt || BigInt(0);
 
-        // Si es super admin, tiene acceso a todo
-        if (esSuperAdmin(permisosBitwise)) {
+        // Si es dueño del sistema o administrador maestro, tiene acceso a todo
+        if (esMaestro(req.usuario) || req.usuario.esAdmin) {
             return next();
         }
 
@@ -133,7 +144,7 @@ export function requirePermisoOrSelf(paramIdName = 'id', ...permisosRequeridos) 
         // Si no es su recurso, verificar permisos
         const permisosBitwise = req.usuario.permisosBigInt || BigInt(0);
 
-        if (esSuperAdmin(permisosBitwise)) {
+        if (esMaestro(req.usuario) || req.usuario.esAdmin) {
             return next();
         }
 
@@ -160,46 +171,60 @@ export const permisosPorModulo = {
     usuarios: {
         ver: requirePermiso('USUARIO_VER'),
         crear: requirePermiso('USUARIO_CREAR'),
-        modificar: requirePermiso('USUARIO_MODIFICAR'),
-        eliminar: requirePermiso('USUARIO_SOFTDELETE'),
-        cualquiera: requirePermiso('USUARIO_VER', 'USUARIO_CREAR', 'USUARIO_MODIFICAR', 'USUARIO_SOFTDELETE')
+        editar: requirePermiso('USUARIO_EDITAR'),
+        eliminar: requirePermiso('USUARIO_ELIMINAR'),
+        cualquiera: requirePermiso('USUARIO_VER', 'USUARIO_CREAR', 'USUARIO_EDITAR', 'USUARIO_ELIMINAR')
     },
     roles: {
         ver: requirePermiso('ROL_VER'),
         crear: requirePermiso('ROL_CREAR'),
-        modificar: requirePermiso('ROL_MODIFICAR'),
+        editar: requirePermiso('ROL_EDITAR'),
         asignar: requirePermiso('ROL_ASIGNAR'),
-        eliminar: requirePermiso('ROL_SOFTDELETE'),
-        cualquiera: requirePermiso('ROL_VER', 'ROL_CREAR', 'ROL_MODIFICAR', 'ROL_ASIGNAR', 'ROL_SOFTDELETE')
+        eliminar: requirePermiso('ROL_ELIMINAR'),
+        cualquiera: requirePermiso('ROL_VER', 'ROL_CREAR', 'ROL_EDITAR', 'ROL_ASIGNAR', 'ROL_ELIMINAR')
     },
     horarios: {
         ver: requirePermiso('HORARIO_VER'),
         crear: requirePermiso('HORARIO_CREAR'),
-        modificar: requirePermiso('HORARIO_MODIFICAR'),
+        editar: requirePermiso('HORARIO_EDITAR'),
         asignar: requirePermiso('HORARIO_ASIGNAR'),
-        eliminar: requirePermiso('HORARIO_SOFTDELETE')
+        eliminar: requirePermiso('HORARIO_ELIMINAR'),
+        gestionar: requirePermiso('HORARIO_GESTIONAR')
     },
     dispositivos: {
         ver: requirePermiso('DISPOSITIVO_VER'),
         crear: requirePermiso('DISPOSITIVO_CREAR'),
-        modificar: requirePermiso('DISPOSITIVO_MODIFICAR'),
-        aceptarSolicitud: requirePermiso('DISPOSITIVO_ACEPTAR_SOLICITUD')
+        editar: requirePermiso('DISPOSITIVO_EDITAR'),
+        eliminar: requirePermiso('DISPOSITIVO_ELIMINAR'),
+        gestionar: requirePermiso('DISPOSITIVO_GESTIONAR')
     },
     departamentos: {
         ver: requirePermiso('DEPARTAMENTO_VER'),
         crear: requirePermiso('DEPARTAMENTO_CREAR'),
-        modificar: requirePermiso('DEPARTAMENTO_MODIFICAR'),
+        editar: requirePermiso('DEPARTAMENTO_EDITAR'),
         asignar: requirePermiso('DEPARTAMENTO_ASIGNAR'),
-        eliminar: requirePermiso('DEPARTAMENTO_SOFTDELETE')
+        eliminar: requirePermiso('DEPARTAMENTO_ELIMINAR')
     },
     registro: {
         ver: requirePermiso('REGISTRO_VER')
     },
+    avisos: {
+        ver: requirePermiso('AVISO_VER'),
+        crear: requirePermiso('AVISO_CREAR'),
+        editar: requirePermiso('AVISO_EDITAR'),
+        eliminar: requirePermiso('AVISO_ELIMINAR')
+    },
     configuracion: {
-        ver: requirePermiso('CONFIGURACION_VER'),
-        modificar: requirePermiso('CONFIGURACION_MODIFICAR')
+        ver: requirePermiso('CONFIG_VER'),
+        general: requirePermiso('CONFIG_GENERAL'),
+        empresa: requirePermiso('CONFIG_EMPRESA'),
+        seguridad: requirePermiso('CONFIG_SEGURIDAD'),
+        asistencia: requirePermiso('CONFIG_ASISTENCIA'),
+        red: requirePermiso('CONFIG_RED'),
+        reportes: requirePermiso('CONFIG_REPORTES')
     },
     reportes: {
+        ver: requirePermiso('REPORTE_VER'),
         exportar: requirePermiso('REPORTE_EXPORTAR')
     }
 };

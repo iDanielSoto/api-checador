@@ -1,6 +1,6 @@
 import { pool } from '../config/db.js';
 import { generateId, ID_PREFIXES } from '../utils/idGenerator.js';
-import { obtenerPermisosActivos, crearPermisos, PERMISOS } from '../utils/permissions.js';
+import { obtenerPermisosActivos, crearPermisos, PERMISOS, CATALOGO_PERMISOS } from '../utils/permissions.js';
 import { registrarEvento, TIPOS_EVENTO, PRIORIDADES } from '../utils/eventos.js';
 
 /**
@@ -397,27 +397,22 @@ export async function reactivarRol(req, res) {
 
 /**
  * GET /api/roles/permisos/catalogo
- * Obtiene el catálogo de permisos disponibles
+ * Obtiene el catálogo de permisos disponibles desde el código
  */
 export async function getPermisosCatalogo(req, res) {
     try {
-        const resultado = await pool.query(`
-            SELECT
-                id,
-                codigo,
-                nombre,
-                descripcion,
-                bit_position,
-                categoria,
-                modulo_id
-            FROM permisos_catalogo
-            WHERE es_activo = true
-            ORDER BY bit_position ASC
-        `);
+        const lista = Object.entries(CATALOGO_PERMISOS).map(([codigo, meta]) => ({
+            id: codigo,
+            codigo: codigo,
+            nombre: meta.nombre,
+            descripcion: meta.descripcion,
+            bit_position: meta.bit,
+            categoria: meta.categoria
+        }));
 
         // Agrupar por categoría
         const porCategoria = {};
-        for (const permiso of resultado.rows) {
+        for (const permiso of lista) {
             if (!porCategoria[permiso.categoria]) {
                 porCategoria[permiso.categoria] = [];
             }
@@ -427,7 +422,7 @@ export async function getPermisosCatalogo(req, res) {
         res.json({
             success: true,
             data: {
-                lista: resultado.rows,
+                lista: lista,
                 por_categoria: porCategoria
             }
         });

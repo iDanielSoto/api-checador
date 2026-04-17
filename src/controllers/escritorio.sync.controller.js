@@ -155,7 +155,7 @@ export async function sincronizarAsistenciasPendientes(req, res) {
 
         // Verificar que el empleado existe y está activo
         const empleadoCheck = await pool.query(`
-          SELECT e.id
+          SELECT e.id, e.horario_id, u.nombre as empleado_nombre
           FROM empleados e
           INNER JOIN usuarios u ON u.id = e.usuario_id
           WHERE e.id = $1 AND u.estado_cuenta = 'activo'
@@ -224,9 +224,10 @@ export async function sincronizarAsistenciasPendientes(req, res) {
             tipo,
             empresa_id,
             fecha_registro,
-            horario_snapshot
+            horario_snapshot,
+            horario_id
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         `, [
           servidor_id,
           registro.estado || registro.clasificacion,
@@ -237,8 +238,31 @@ export async function sincronizarAsistenciasPendientes(req, res) {
           registro.tipo,
           empresa_id,
           fecha_registro,
-          horarioSnapshot
+          horarioSnapshot,
+          empleadoCheck.rows[0].horario_id
         ]);
+
+        // Registrar evento de auditoría para la sincronización
+        const eventoId = await generateId(ID_PREFIXES.EVENTO);
+        const fechaSql = fecha_registro.toLocaleString('sv-SE', { timeZone: 'America/Mexico_City' });
+        await pool.query(
+            `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) 
+             VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5, $6)`,
+            [
+                eventoId, 
+                `Sincronización de ${registro.tipo} - ${registro.estado || registro.clasificacion}`, 
+                `${empleadoCheck.rows[0].empleado_nombre} sincronizó ${registro.tipo} (kiosco offline)`, 
+                registro.empleado_id, 
+                JSON.stringify({ 
+                    asistencia_id: servidor_id, 
+                    estado: registro.estado || registro.clasificacion, 
+                    tipo: registro.tipo, 
+                    metodo: registro.metodo || 'desconocido',
+                    modo: 'offline_sync_escritorio'
+                }), 
+                fechaSql
+            ]
+        );
 
         // Marcar como sincronizado
         sincronizados.push({

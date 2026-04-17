@@ -27,7 +27,8 @@ router.post('/', createIncidencia);  // Cualquier empleado puede crear incidenci
 router.put('/:id', updateIncidencia);
 
 // Aprobación/Rechazo (requiere permisos de admin o supervisor)
-router.patch('/:id/aprobar', requirePermiso('USUARIO_MODIFICAR'), aprobarIncidencia);
-router.patch('/:id/rechazar', requirePermiso('USUARIO_MODIFICAR'), rechazarIncidencia);
+router.patch('/:id/aprobar', requirePermiso('USUARIO_EDITAR'), aprobarIncidencia);
+router.patch('/:id/rechazar', requirePermiso('USUARIO_EDITAR'), rechazarIncidencia);
 
 export default router;
+

@@ -142,9 +142,10 @@ export async function verificarAutenticacion(req, res, next) {
             ORDER BY r.posicion ASC
         `, [userId]);
 
-        // Combinar permisos de todos los roles
+        // Combinar permisos de todos los roles y determinar mejor rango (posición mínima)
         let permisosCombinadosBigInt = BigInt(0);
         let esAdmin = false;
+        let mejorPosicion = 999; // Valor base (mínima jerarquía)
 
         for (const rol of rolesResult.rows) {
             if (rol.permisos_bitwise) {
@@ -152,6 +153,11 @@ export async function verificarAutenticacion(req, res, next) {
             }
             if (rol.es_admin) {
                 esAdmin = true;
+            }
+            // Si el rol tiene posición, actualizamos la mejor (mínima)
+            const pos = parseInt(rol.posicion);
+            if (!isNaN(pos) && pos < mejorPosicion) {
+                mejorPosicion = pos;
             }
         }
 
@@ -162,6 +168,7 @@ export async function verificarAutenticacion(req, res, next) {
             roles: rolesResult.rows,
             permisos: permisosCombinadosBigInt.toString(),
             permisosBigInt: permisosCombinadosBigInt,
+            mejorPosicion,
             esAdmin
         };
         req.empresa_id = resultado.rows[0].empresa_id;

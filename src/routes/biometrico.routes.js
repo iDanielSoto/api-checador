@@ -45,8 +45,9 @@ router.get('/escritorio/:escritorioId', async (req, res) => {
 router.get('/stats', requirePermiso('DISPOSITIVO_VER'), getStatsBiometrico);
 router.get('/:id', requirePermiso('DISPOSITIVO_VER'), getBiometricoById);
 router.post('/', requirePermiso('DISPOSITIVO_CREAR'), createBiometrico);
-router.put('/:id', requirePermiso('DISPOSITIVO_MODIFICAR'), updateBiometrico);
-router.delete('/:id', requirePermiso('DISPOSITIVO_MODIFICAR'), deleteBiometrico);
+router.put('/:id', requirePermiso('DISPOSITIVO_EDITAR'), updateBiometrico);
+router.delete('/:id', requirePermiso('DISPOSITIVO_EDITAR'), deleteBiometrico);
 
 
 export default router;
+

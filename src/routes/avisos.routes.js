@@ -29,3 +29,4 @@ router.delete('/:id', deleteAviso);
 router.get('/globales', getGlobalAvisos);
 
 export default router;
+

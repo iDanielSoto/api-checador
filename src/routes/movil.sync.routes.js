@@ -33,3 +33,4 @@ router.post('/sync/sesiones', movilSyncController.sincronizarSesiones);
 router.get('/sync/dispositivos/:empleadoId', movilSyncController.verificarDispositivosEmpleado);
 
 export default router;
+

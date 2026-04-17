@@ -15,6 +15,7 @@ router.get('/:escritorio_id', getConfiguracionEscritorio);
 router.use(verificarAutenticacion);
 
 // Solo usuarios con permisos pueden modificar estas configuraciones
-router.put('/:escritorio_id', requirePermiso('DISPOSITIVO_MODIFICAR'), updateConfiguracionEscritorio);
+router.put('/:escritorio_id', requirePermiso('DISPOSITIVO_EDITAR'), updateConfiguracionEscritorio);
 
 export default router;
+

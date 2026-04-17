@@ -10,9 +10,10 @@ router.get('/public/status', getMantenimientoStatus);
 
 router.use(verificarAutenticacion);
 
-router.get('/', requirePermiso('CONFIGURACION_VER'), getConfiguracion);
-router.get('/:id', requirePermiso('CONFIGURACION_VER'), getConfiguracionById);
-router.put('/:id', requirePermiso('CONFIGURACION_MODIFICAR'), updateConfiguracion);
-router.patch('/:id/mantenimiento', requirePermiso('CONFIGURACION_MODIFICAR'), toggleMantenimiento);
+router.get('/', requirePermiso('CONFIG_VER'), getConfiguracion);
+router.get('/:id', requirePermiso('CONFIG_VER'), getConfiguracionById);
+router.put('/:id', requirePermiso('CONFIG_GENERAL'), updateConfiguracion);
+router.patch('/:id/mantenimiento', requirePermiso('CONFIG_GENERAL'), toggleMantenimiento);
 
 export default router;
+

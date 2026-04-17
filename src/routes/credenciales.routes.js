@@ -33,10 +33,10 @@ router.post('/facial/verify-image', verificarFacialPorImagen);
 // ── Rutas protegidas ──
 router.get('/', requirePermiso('USUARIO_VER'), getCredenciales);
 router.get('/empleado/:empleadoId', requirePermiso('USUARIO_VER'), getCredencialesByEmpleado);
-router.post('/dactilar', requirePermiso('USUARIO_MODIFICAR'), guardarDactilar);
-router.post('/facial', requirePermiso('USUARIO_MODIFICAR'), guardarFacial);
-router.post('/pin', requirePermiso('USUARIO_MODIFICAR'), guardarPin);
+router.post('/dactilar', requirePermiso('USUARIO_EDITAR'), guardarDactilar);
+router.post('/facial', requirePermiso('USUARIO_EDITAR'), guardarFacial);
+router.post('/pin', requirePermiso('USUARIO_EDITAR'), guardarPin);
 router.post('/verificar-pin', verificarPin);
-router.delete('/empleado/:empleadoId', requirePermiso('USUARIO_MODIFICAR'), eliminarCredencial);
+router.delete('/empleado/:empleadoId', requirePermiso('USUARIO_EDITAR'), eliminarCredencial);
 
 export default router;

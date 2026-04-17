@@ -18,7 +18,8 @@ router.use(verificarEmpresa);
 router.get('/', requirePermiso('HORARIO_VER'), getTolerancias);
 router.get('/:id', requirePermiso('HORARIO_VER'), getToleranciaById);
 router.post('/', requirePermiso('HORARIO_CREAR'), createTolerancia);
-router.put('/:id', requirePermiso('HORARIO_MODIFICAR'), updateTolerancia);
-router.delete('/:id', requirePermiso('HORARIO_SOFTDELETE'), deleteTolerancia);
+router.put('/:id', requirePermiso('HORARIO_EDITAR'), updateTolerancia);
+router.delete('/:id', requirePermiso('HORARIO_ELIMINAR'), deleteTolerancia);
 
 export default router;
+

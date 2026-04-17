@@ -221,6 +221,7 @@ export async function getDetalleAsistencias(req, res) {
                 a.estado,
                 a.fecha_registro,
                 a.dispositivo_origen,
+                a.horario_id,
                 e.id as empleado_id,
                 u.nombre as empleado_nombre,
                 e.rfc
@@ -446,13 +447,15 @@ export async function getReporteChecadasQuincena(req, res) {
             ? (typeof empleado.configuracion === 'string' ? JSON.parse(empleado.configuracion) : empleado.configuracion)
             : null;
 
-        // Asistencias del período
+        // Asistencias del período (incluyendo el ID del horario histórico)
         const asistRes = await pool.query(`
-            SELECT id, tipo, estado, fecha_registro, dispositivo_origen, horario_snapshot
-            FROM asistencias
-            WHERE empleado_id = $1
-              AND fecha_registro::date BETWEEN $2 AND $3
-            ORDER BY fecha_registro ASC
+            SELECT a.id, a.tipo, a.estado, a.fecha_registro, a.dispositivo_origen, a.horario_snapshot, a.horario_id,
+                   h.configuracion as horario_config_historico
+            FROM asistencias a
+            LEFT JOIN horarios h ON h.id = a.horario_id
+            WHERE a.empleado_id = $1
+              AND a.fecha_registro::date BETWEEN $2 AND $3
+            ORDER BY a.fecha_registro ASC
         `, [empleado_id, fecha_inicio, fecha_fin]);
 
         // Incidencias del período
@@ -485,14 +488,21 @@ export async function getReporteChecadasQuincena(req, res) {
             const registrosDia = porFecha[fechaStr] || [];
 
             // Obtener turnos del horario para ese día
+            // Prioridad: El horario que tenía asignado en la primera checada del día, o el horario actual como fallback.
+            const horarioADesglosar = registrosDia.find(r => r.horario_config_historico)?.horario_config_historico 
+                ? (typeof registrosDia.find(r => r.horario_config_historico).horario_config_historico === 'string' 
+                   ? JSON.parse(registrosDia.find(r => r.horario_config_historico).horario_config_historico) 
+                   : registrosDia.find(r => r.horario_config_historico).horario_config_historico)
+                : horarioConfig;
+
             let turnosDia = [];
-            if (horarioConfig?.configuracion_semanal?.[diaSemana]) {
-                turnosDia = horarioConfig.configuracion_semanal[diaSemana].map(t => ({
+            if (horarioADesglosar?.configuracion_semanal?.[diaSemana]) {
+                turnosDia = horarioADesglosar.configuracion_semanal[diaSemana].map(t => ({
                     entrada: t.inicio,
                     salida: t.fin
                 }));
-            } else if (horarioConfig?.dias?.includes(diaSemana)) {
-                turnosDia = (horarioConfig.turnos || []).map(t => ({
+            } else if (horarioADesglosar?.dias?.includes(diaSemana)) {
+                turnosDia = (horarioADesglosar.turnos || []).map(t => ({
                     entrada: t.entrada || t.inicio,
                     salida: t.salida || t.fin
                 }));
@@ -640,17 +650,18 @@ export async function getReporteIncidenciasRRHH(req, res) {
         // 2. Obtener incidencias (asistencias con estado != 'puntual')
         const asistRes = await pool.query(`
             SELECT 
-                id, 
-                estado, 
-                fecha_registro, 
-                horario_snapshot,
-                tipo
-            FROM asistencias
-            WHERE empleado_id = $1
-              AND fecha_registro::date BETWEEN $2 AND $3
-              AND estado NOT IN ('puntual', 'fin_bloque')
-              AND tipo = 'entrada'
-            ORDER BY fecha_registro ASC
+                a.id, 
+                a.estado, 
+                a.fecha_registro, 
+                a.horario_snapshot,
+                a.horario_id,
+                a.tipo
+            FROM asistencias a
+            WHERE a.empleado_id = $1
+              AND a.fecha_registro::date BETWEEN $2 AND $3
+              AND a.estado NOT IN ('puntual', 'fin_bloque')
+              AND a.tipo = 'entrada'
+            ORDER BY a.fecha_registro ASC
         `, [empleado_id, fecha_inicio, fecha_fin]);
 
         // 3. Procesar las incidencias para el formato solicitado

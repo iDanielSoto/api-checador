@@ -1,0 +1,317 @@
+# 🛠️ Plan de Implementación: Control Remoto del Kiosko
+
+## Objetivo
+
+Implementar dos componentes que trabajen en conjunto para permitir al **panel administrador** cerrar, reiniciar y volver a abrir el kiosko de forma remota, sin intervención física.
+
+```
+┌─────────────────────┐       ┌───────────────┐       ┌──────────────────────────────────┐
+│  Panel Administrador │──────▶│    Backend    │◀─────▶│  Kiosko (escritorio)             │
+└─────────────────────┘       └───────────────┘       │  ┌────────────────────────────┐  │
+                                                       │  │ remoteCommandService.mjs   │  │
+                                                       │  │ (poll cada 30s)            │  │
+                                                       │  └────────────────────────────┘  │
+                                                       └─────────────────┬────────────────┘
+                                                                         │ app.quit()
+                                                       ┌─────────────────▼────────────────┐
+                                                       │  Watchdog (Task Scheduler)        │
+                                                       │  watchdog.ps1 (poll cada 10s)     │
+                                                       │  → relanza la app cuando se pide  │
+                                                       └───────────────────────────────────┘
+```
+
+---
+
+## Parte 1 — Polling Remoto en el Kiosko
+
+### Archivos a crear / modificar
+
+---
+
+#### [NEW] `electron/services/remoteCommandService.mjs`
+
+Nuevo servicio de polling que el kiosko ejecutará cada 30 segundos para preguntar al backend si existe algún comando pendiente para este nodo.
+
+**Variables de estado internas:**
+```
+nodeId      → leído desde app-config.json (configHelper.getConfigValue("nodeId"))
+apiBaseUrl  → leído desde configHelper.getBackendUrl()
+pollInterval → referencia al setInterval
+isRunning    → bandera para evitar llamadas solapadas
+```
+
+**Función principal `checkRemoteCommand()`:**
+```
+1. Si isRunning === true → salir (evitar solapamiento)
+2. isRunning = true
+3. Leer nodeId y apiBaseUrl desde configHelper
+4. Si no hay nodeId → log + salir (nodo no configurado aún, no es error)
+5. GET {apiBaseUrl}/api/nodos/{nodeId}/comando
+   → timeout de 8 segundos (AbortController)
+6. Parsear respuesta { accion: "none" | "shutdown" | "restart" }
+7. switch(accion):
+   ├── "none"     → no hacer nada
+   ├── "shutdown" → log + llamar app.quit()
+   └── "restart"  → log + llamar app.relaunch() + app.quit()
+8. isRunning = false
+9. Si hay error de red → log silencioso, isRunning = false, continuar
+```
+
+**Funciones exportadas:**
+```js
+startRemoteCommandPoll(intervalMs = 30000)  // inicia el setInterval
+stopRemoteCommandPoll()                      // limpia el intervalo
+checkRemoteCommand()                         // ejecuta un check manual
+```
+
+**Patrón idéntico a `rawSyncService.mjs`** — misma estructura de módulo, mismo manejo de errores, mismo uso de `configHelper`.
+
+---
+
+#### [MODIFY] `electron/main.mjs`
+
+Integrar el nuevo servicio siguiendo exactamente el patrón que ya se usa con `rawSyncService`:
+
+```diff
++ import * as remoteCommandService from "./services/remoteCommandService.mjs";
+
+  // Dentro de app.whenReady():
++ remoteCommandService.startRemoteCommandPoll(30000); // cada 30s
++ console.log('[Main] Status: Polling de comandos remotos iniciado');
+
+  // Dentro de app.on("will-quit"):
++ remoteCommandService.stopRemoteCommandPoll();
+```
+
+> [!NOTE]
+> No se necesita ningún IPC handler. El servicio corre 100% en el proceso principal de Electron y llama `app.quit()` directamente, que es la forma correcta en Electron.
+
+---
+
+#### [MODIFY] `electron/preload.cjs` *(opcional, para feedback en UI)*
+
+Si en el futuro se quiere mostrar al usuario un mensaje como "El administrador ha solicitado apagar este equipo en 10 segundos...", se puede exponer un evento IPC al renderer. **No es necesario para la implementación inicial.**
+
+---
+
+### Contrato del endpoint en el backend
+
+El kiosko esperará este comportamiento del backend:
+
+```
+GET /api/nodos/:nodeId/comando
+Authorization: Bearer {token}   ← si el sistema tiene auth por token
+
+Respuesta exitosa:
+  200 { accion: "none" }         ← sin comandos pendientes
+  200 { accion: "shutdown" }     ← admin quiere apagar
+  200 { accion: "restart" }      ← admin quiere reiniciar
+
+Respuestas de error (el kiosko las ignorará silenciosamente):
+  401 / 403  → token inválido
+  404        → nodo no encontrado
+  5xx        → error del servidor
+```
+
+> [!IMPORTANT]
+> El backend debe **limpiar el comando** después de entregarlo (set `accion = "none"`) para que no se ejecute en el próximo poll. Esto es responsabilidad del backend, no del kiosko.
+
+---
+
+## Parte 2 — Watchdog PowerShell + Task Scheduler
+
+### Archivos a crear / modificar
+
+---
+
+#### [NEW] `electron/watchdog/watchdog.ps1`
+
+Script PowerShell que correrá **permanentemente** en Windows como tarea programada, independiente del proceso de Electron.
+
+**Lógica completa:**
+
+```
+== INICIALIZACIÓN ==
+$configPath = "C:\ProgramData\SistemaAsistencia\app-config.json"
+$processName = "Sistema de Asistencia"     ← nombre del exe sin extensión
+$exePath = detectar desde registro o desde path fijo de instalación
+$pollInterval = 10                          ← segundos entre cada check
+$errorInterval = 30                         ← segundos en caso de error de red
+
+== LOOP INFINITO ==
+while ($true) {
+
+  1. Leer app-config.json
+     → Obtener $nodeId = config.nodeId
+     → Obtener $backendUrl = config.backendUrl
+
+  2. Si $nodeId está vacío:
+     → Log: "Nodo no configurado, esperando..."
+     → Start-Sleep $pollInterval
+     → continue (no hacer nada más)
+
+  3. Intentar GET $backendUrl/api/nodos/$nodeId/watchdog-comando
+     → Timeout: 8 segundos
+     → Si error de red: Log silencioso, Start-Sleep $errorInterval, continue
+
+  4. switch ($response.accion):
+     ├── "none" → no hacer nada
+     └── "start" →
+           $isRunning = Get-Process -Name $processName -ErrorAction SilentlyContinue
+           if (-not $isRunning) {
+               Log: "Iniciando kiosko..."
+               Start-Process -FilePath $exePath -WindowStyle Normal
+               Start-Sleep 3   ← esperar a que el proceso arranque
+           } else {
+               Log: "Kiosko ya está corriendo, ignorando comando start"
+           }
+
+  5. [BONUS - GUARDIÁN DE DISPONIBILIDAD]
+     Si accion === "none": verificar igual si el proceso vive
+     $isRunning = Get-Process -Name $processName -ErrorAction SilentlyContinue
+     if (-not $isRunning) {
+         Log: "ALERTA: Kiosko no detectado. Relanzando automáticamente..."
+         Start-Process -FilePath $exePath -WindowStyle Normal
+     }
+
+  6. Start-Sleep $pollInterval
+}
+```
+
+> [!IMPORTANT]
+> El Watchdog usa un **endpoint diferente** al del kiosko: `/api/nodos/:nodeId/watchdog-comando`. Esto permite que el backend distinga entre "el kiosko está vivo y pregunta" vs "el watchdog está preguntando si debe arrancar el kiosko". El admin puede enviar `{ accion: "start" }` a este endpoint cuando el kiosko está apagado.
+
+---
+
+#### [NEW] `electron/watchdog/install-watchdog.ps1`
+
+Script que se ejecuta **una sola vez durante la instalación** desde el NSIS. Registra el watchdog como Tarea Programada de Windows.
+
+```
+Parámetros que recibe: ninguno (usa rutas absolutas predefinidas)
+
+Acciones:
+1. Definir $watchdogPath = "C:\ProgramData\SistemaAsistencia\watchdog.ps1"
+2. Definir $taskName = "SistemaAsistencia-Watchdog"
+3. Eliminar la tarea si ya existe (para reinstalaciones limpias)
+4. Crear la tarea con estos parámetros:
+   - Action:  powershell.exe -NonInteractive -WindowStyle Hidden -File $watchdogPath
+   - Trigger: AtStartup (al encender Windows)
+   - RunAs:   SYSTEM
+   - RunLevel: Highest (administrador)
+   - RestartOnFailure: cada 1 minuto, hasta 3 veces
+   - ExecutionTimeLimit: PT0S (sin límite de tiempo)
+5. Iniciar la tarea inmediatamente: Start-ScheduledTask -TaskName $taskName
+6. Log: "Watchdog instalado y en ejecución"
+```
+
+---
+
+#### [NEW] `electron/watchdog/uninstall-watchdog.ps1`
+
+Script que se ejecuta al desinstalar la app desde NSIS.
+
+```
+1. Stop-ScheduledTask -TaskName "SistemaAsistencia-Watchdog" -ErrorAction SilentlyContinue
+2. Unregister-ScheduledTask -TaskName "SistemaAsistencia-Watchdog" -Confirm:$false
+3. Log: "Watchdog eliminado"
+```
+
+---
+
+#### [MODIFY] `build/installer.nsh`
+
+Agregar la instalación del watchdog después de la instalación de DigitalPersona SDK:
+
+```nsis
+!macro customInstall
+  ; --- Ya existente: SDK DigitalPersona ---
+  InitPluginsDir
+  SetOutPath $PLUGINSDIR
+  File "${PROJECT_DIR}\electron\BiometricMiddleware\installers\DigitalPersona_SDK_Setup.msi"
+  DetailPrint "Instalando dependencias biometricas (DigitalPersona SDK)..."
+  ExecWait '"msiexec" /i "$PLUGINSDIR\DigitalPersona_SDK_Setup.msi" /quiet /norestart'
+
+  ; --- NUEVO: Copiar scripts del Watchdog ---
+  SetOutPath "$PROGRAMDATA\SistemaAsistencia"
+  File "${PROJECT_DIR}\electron\watchdog\watchdog.ps1"
+  File "${PROJECT_DIR}\electron\watchdog\install-watchdog.ps1"
+  File "${PROJECT_DIR}\electron\watchdog\uninstall-watchdog.ps1"
+
+  ; --- NUEVO: Registrar la Tarea Programada ---
+  DetailPrint "Instalando Watchdog del sistema..."
+  ExecWait 'powershell -NonInteractive -ExecutionPolicy Bypass -File "$PROGRAMDATA\SistemaAsistencia\install-watchdog.ps1"'
+!macroend
+
+!macro customUnInstall
+  ; --- NUEVO: Eliminar la Tarea Programada ---
+  DetailPrint "Eliminando Watchdog del sistema..."
+  ExecWait 'powershell -NonInteractive -ExecutionPolicy Bypass -File "$PROGRAMDATA\SistemaAsistencia\uninstall-watchdog.ps1"'
+!macroend
+```
+
+> [!NOTE]
+> `$PROGRAMDATA` en NSIS equivale a `C:\ProgramData`. Esto asegura que el watchdog esté en una ubicación accesible incluso para la cuenta SYSTEM, independientemente del usuario logueado.
+
+---
+
+#### [MODIFY] `package.json` — sección `build.extraResources`
+
+Asegurarse de que los scripts del watchdog se empaqueten en el release:
+
+```json
+"extraResources": [
+  {
+    "from": "electron/watchdog/",
+    "to": "watchdog",
+    "filter": ["**/*.ps1"]
+  }
+]
+```
+
+---
+
+### Dónde lee el Watchdog el `nodeId`
+
+El `app-config.json` ya existe y lo gestiona `configHelper.mjs`. Lo que se necesita es asegurar que al guardar el `nodeId` durante el flujo de configuración del kiosko, se guarde también en `C:\ProgramData\SistemaAsistencia\app-config.json` (ubicación accesible para SYSTEM).
+
+**Dos opciones:**
+
+| Opción | Descripción |
+|---|---|
+| **A — Path compartido** | Mover `app-config.json` a `C:\ProgramData\SistemaAsistencia\` en lugar de `AppData\Roaming`. Electron puede leer desde cualquier path. |
+| **B — Copia sincronizada** | Cada vez que se guarda config, también se copia a `C:\ProgramData\SistemaAsistencia\`. |
+
+> **Recomendación: Opción A** — Cambiar `configHelper.mjs` para que el `configPath` apunte a `C:\ProgramData\SistemaAsistencia\app-config.json`. Esto elimina duplicación y garantiza que el Watchdog siempre lea la configuración más reciente.
+
+---
+
+## Resumen de Archivos
+
+| Archivo | Acción | Propósito |
+|---|---|---|
+| `electron/services/remoteCommandService.mjs` | **CREAR** | Polling de comandos remotos en el proceso Electron |
+| `electron/main.mjs` | **MODIFICAR** | Iniciar/detener el nuevo servicio |
+| `electron/watchdog/watchdog.ps1` | **CREAR** | Loop infinito en Windows para relanzar el kiosko |
+| `electron/watchdog/install-watchdog.ps1` | **CREAR** | Registrar la Tarea Programada en Windows |
+| `electron/watchdog/uninstall-watchdog.ps1` | **CREAR** | Eliminar la Tarea Programada al desinstalar |
+| `build/installer.nsh` | **MODIFICAR** | Copiar watchdog y ejecutar instalación al instalar la app |
+| `electron/utils/configHelper.mjs` | **MODIFICAR** | Cambiar path de config a `C:\ProgramData\SistemaAsistencia\` |
+| `package.json` | **MODIFICAR** | Incluir scripts `.ps1` en el empaquetado |
+
+---
+
+## Plan de Verificación
+
+### Durante Desarrollo
+1. Ejecutar `npm run electron:dev`
+2. Verificar en consola que aparece `[Main] Status: Polling de comandos remotos iniciado`
+3. Simular respuesta del backend desde un mock y confirmar que `app.quit()` se llama
+
+### En Producción (después del build)
+1. Instalar la app con el nuevo `installer.nsh`
+2. Abrir Task Scheduler de Windows → verificar que existe la tarea `SistemaAsistencia-Watchdog`
+3. Verificar que la tarea está corriendo con usuario SYSTEM
+4. Apagar manualmente el kiosko → esperar ~10s → la app debe relanzarse sola
+5. Enviar comando `shutdown` desde el administrador → verificar que cierra en ≤30s
+6. Enviar comando `start` → verificar que el watchdog lo lanza en ≤10s

@@ -1,0 +1,114 @@
+[
+  {
+    "bit_position": 0,
+    "codigo": "USUARIO_VER"
+  },
+  {
+    "bit_position": 1,
+    "codigo": "USUARIO_CREAR"
+  },
+  {
+    "bit_position": 2,
+    "codigo": "USUARIO_MODIFICAR"
+  },
+  {
+    "bit_position": 3,
+    "codigo": "USUARIO_SOFTDELETE"
+  },
+  {
+    "bit_position": 4,
+    "codigo": "ROL_VER"
+  },
+  {
+    "bit_position": 5,
+    "codigo": "ROL_CREAR"
+  },
+  {
+    "bit_position": 6,
+    "codigo": "ROL_MODIFICAR"
+  },
+  {
+    "bit_position": 7,
+    "codigo": "ROL_ASIGNAR"
+  },
+  {
+    "bit_position": 8,
+    "codigo": "ROL_SOFTDELETE"
+  },
+  {
+    "bit_position": 9,
+    "codigo": "HORARIO_VER"
+  },
+  {
+    "bit_position": 10,
+    "codigo": "HORARIO_CREAR"
+  },
+  {
+    "bit_position": 11,
+    "codigo": "HORARIO_MODIFICAR"
+  },
+  {
+    "bit_position": 12,
+    "codigo": "HORARIO_ASIGNAR"
+  },
+  {
+    "bit_position": 13,
+    "codigo": "HORARIO_SOFTDELETE"
+  },
+  {
+    "bit_position": 14,
+    "codigo": "DISPOSITIVO_VER"
+  },
+  {
+    "bit_position": 15,
+    "codigo": "DISPOSITIVO_CREAR"
+  },
+  {
+    "bit_position": 16,
+    "codigo": "DISPOSITIVO_MODIFICAR"
+  },
+  {
+    "bit_position": 17,
+    "codigo": "DISPOSITIVO_ACEPTAR_SOLICITUD"
+  },
+  {
+    "bit_position": 18,
+    "codigo": "DEPARTAMENTO_VER"
+  },
+  {
+    "bit_position": 19,
+    "codigo": "DEPARTAMENTO_CREAR"
+  },
+  {
+    "bit_position": 20,
+    "codigo": "DEPARTAMENTO_MODIFICAR"
+  },
+  {
+    "bit_position": 21,
+    "codigo": "DEPARTAMENTO_ASIGNAR"
+  },
+  {
+    "bit_position": 22,
+    "codigo": "DEPARTAMENTO_SOFTDELETE"
+  },
+  {
+    "bit_position": 23,
+    "codigo": "REGISTRO_VER"
+  },
+  {
+    "bit_position": 24,
+    "codigo": "CONFIGURACION_VER"
+  },
+  {
+    "bit_position": 25,
+    "codigo": "CONFIGURACION_MODIFICAR"
+  },
+  {
+    "bit_position": 26,
+    "codigo": "REPORTE_EXPORTAR"
+  },
+  {
+    "bit_position": 63,
+    "codigo": "SUPER_ADMIN"
+  }
+]

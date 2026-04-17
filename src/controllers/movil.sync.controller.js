@@ -193,7 +193,7 @@ export const sincronizarAsistencias = async (req, res) => {
 
                 // Verificar que el empleado existe y cargar su empresa
                 const empCheck = await pool.query(
-                    'SELECT e.id, u.id as usuario_id, u.empresa_id FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1',
+                    'SELECT e.id, e.horario_id, u.id as usuario_id, u.empresa_id, u.nombre as empleado_nombre FROM empleados e INNER JOIN usuarios u ON u.id = e.usuario_id WHERE e.id = $1',
                     [reg.empleado_id]
                 );
 
@@ -416,8 +416,8 @@ export const sincronizarAsistencias = async (req, res) => {
                 await pool.query(`
                     INSERT INTO asistencias
                     (id, empleado_id, tipo, estado, departamento_id,
-                     dispositivo_origen, fecha_registro, ubicacion, alertas, horario_snapshot, empresa_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                     dispositivo_origen, fecha_registro, ubicacion, alertas, horario_snapshot, empresa_id, horario_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 `, [
                     servidor_id,
                     reg.empleado_id,
@@ -429,8 +429,31 @@ export const sincronizarAsistencias = async (req, res) => {
                     reg.ubicacion || null,
                     JSON.stringify(alertasReg),
                     horarioSnapshot,
-                    empCheck.rows[0].empresa_id
+                    empCheck.rows[0].empresa_id,
+                    empCheck.rows[0].horario_id
                 ]);
+
+                // Registrar evento de auditoría para la sincronización
+                const eventoId = await generateId(ID_PREFIXES.EVENTO);
+                const fechaSql = fecha.toLocaleString('sv-SE', { timeZone: 'America/Mexico_City' });
+                await pool.query(
+                    `INSERT INTO eventos(id, titulo, descripcion, tipo_evento, prioridad, empleado_id, detalles, fecha_registro) 
+                     VALUES($1, $2, $3, 'asistencia', 'baja', $4, $5, $6)`,
+                    [
+                        eventoId, 
+                        `Sincronización de ${reg.tipo} - ${estadoCalculado}`, 
+                        `${empCheck.rows[0].empleado_nombre} sincronizó ${reg.tipo} (offline)`, 
+                        reg.empleado_id, 
+                        JSON.stringify({ 
+                            asistencia_id: servidor_id, 
+                            estado: estadoCalculado, 
+                            tipo: reg.tipo, 
+                            metodo: reg.metodo_registro ? reg.metodo_registro.toLowerCase() : 'desconocido',
+                            modo: 'offline_sync'
+                        }), 
+                        fechaSql
+                    ]
+                );
 
                 sincronizados.push({
                     id_local: reg.id,

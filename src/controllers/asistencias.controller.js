@@ -231,8 +231,8 @@ async function registrarAsistenciaMovil(req, res) {
             })
             : null;
         await pool.query(
-            `INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id, fecha_registro, horario_snapshot) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')} } ` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaRegistroSql, horarioSnapshot]
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, ubicacion, empleado_id, departamento_id, tipo, empresa_id, fecha_registro, horario_snapshot, horario_id) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [id, estadoFinal, dispositivo_origen || 'movil', ubicacion ? `{${ubicacion.join(',')} } ` : null, empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaRegistroSql, horarioSnapshot, empleado.horario_id]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
@@ -346,8 +346,8 @@ async function registrarAsistenciaEscritorio(req, res) {
             })
             : null;
         await pool.query(
-            `INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro, horario_snapshot) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaRegistroSql, horarioSnapshot]
+            `INSERT INTO asistencias(id, estado, dispositivo_origen, empleado_id, departamento_id, tipo, empresa_id, fecha_registro, horario_snapshot, horario_id) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [id, estadoFinal, dispositivo_origen || 'escritorio', empleado_id, departamento_id, tipoFinal, req.empresa_id, fechaRegistroSql, horarioSnapshot, empleado.horario_id]
         );
 
         const eventoId = await generateId(ID_PREFIXES.EVENTO);
@@ -758,16 +758,16 @@ export async function registrarAsistenciaManual(req, res) {
         // ── Insertar Entrada (con empresa_id y departamento_id) ──
         const idEntrada = await generateId(ID_PREFIXES.ASISTENCIA);
         await client.query(`
-            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion)
-VALUES($1, $2, 'manual', $3, $4, $5, 'entrada', $6, '{"Registro Manual Admin"}')
-    `, [idEntrada, estadoEntrada, fechaEntrada, empleado_id, deptoId, empresaId]);
+            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion, horario_id)
+VALUES($1, $2, 'manual', $3, $4, $5, 'entrada', $6, '{"Registro Manual Admin"}', $7)
+    `, [idEntrada, estadoEntrada, fechaEntrada, empleado_id, deptoId, empresaId, empleado.horario_id]);
 
         // ── Insertar Salida ──
         const idSalida = await generateId(ID_PREFIXES.ASISTENCIA);
         await client.query(`
-            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion)
-VALUES($1, 'salida_puntual', 'manual', $2, $3, $4, 'salida', $5, '{"Registro Manual Admin"}')
-    `, [idSalida, fechaSalida, empleado_id, deptoId, empresaId]);
+            INSERT INTO asistencias(id, estado, dispositivo_origen, fecha_registro, empleado_id, departamento_id, tipo, empresa_id, ubicacion, horario_id)
+VALUES($1, 'salida_puntual', 'manual', $2, $3, $4, 'salida', $5, '{"Registro Manual Admin"}', $6)
+    `, [idSalida, fechaSalida, empleado_id, deptoId, empresaId, empleado.horario_id]);
 
         // ── Insertar Evento ──
         const idEvento = await generateId(ID_PREFIXES.EVENTO);

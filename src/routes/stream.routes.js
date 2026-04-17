@@ -8,3 +8,4 @@ const router = Router();
 router.get('/', verificarAutenticacion, streamEvents);
 
 export default router;
+

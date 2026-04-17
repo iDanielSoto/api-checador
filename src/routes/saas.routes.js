@@ -12,3 +12,4 @@ router.get('/metricas', getMetricasSaaS);
 router.get('/logs', getLogsSaaS);
 
 export default router;
+

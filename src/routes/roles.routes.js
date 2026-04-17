@@ -26,11 +26,12 @@ router.get('/permisos/catalogo', requirePermiso('ROL_VER'), getPermisosCatalogo)
 router.get('/', requirePermiso('ROL_VER'), getRoles);
 router.get('/:id', requirePermiso('ROL_VER'), getRolById);
 router.post('/', requirePermiso('ROL_CREAR'), createRol);
-router.put('/:id', requirePermiso('ROL_MODIFICAR'), updateRol);
-router.delete('/:id', requirePermiso('ROL_SOFTDELETE'), deleteRol);
-router.patch('/:id/reactivar', requirePermiso('ROL_SOFTDELETE'), reactivarRol);
+router.put('/:id', requirePermiso('ROL_EDITAR'), updateRol);
+router.delete('/:id', requirePermiso('ROL_ELIMINAR'), deleteRol);
+router.patch('/:id/reactivar', requirePermiso('ROL_ELIMINAR'), reactivarRol);
 
 // Usuarios de un rol
 router.get('/:id/usuarios', requirePermiso('ROL_VER'), getUsuariosConRol);
 
 export default router;
+

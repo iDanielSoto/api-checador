@@ -22,7 +22,7 @@ export async function getEscritorios(req, res) {
                 e.es_activo,
                 (SELECT COUNT(*) FROM biometrico b WHERE b.escritorio_id = e.id AND b.es_activo = true) as biometricos_count
             FROM escritorio e
-            WHERE e.empresa_id = $1 AND e.es_activo = true
+            WHERE e.empresa_id = $1
         `;
         const params = [req.empresa_id];
 
@@ -431,5 +431,128 @@ export async function getEscritorioStatusPublico(req, res) {
             success: false,
             message: 'Error al consultar estado del dispositivo'
         });
+    }
+}
+
+/**
+ * GET /api/escritorio/:id/comando-kiosko
+ * Obtiene el comando pendiente para el kiosko (y lo limpia atómicamente)
+ */
+export async function getComandoKiosko(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            WITH comando_pendiente AS (
+                SELECT id, comando_kiosko 
+                FROM escritorio 
+                WHERE id = $1 AND empresa_id = $2 AND comando_kiosko != 'none'
+                FOR UPDATE
+            )
+            UPDATE escritorio 
+            SET comando_kiosko = 'none' 
+            FROM comando_pendiente
+            WHERE escritorio.id = comando_pendiente.id
+            RETURNING comando_pendiente.comando_kiosko
+        `, [id, req.empresa_id]);
+
+        if (resultado.rows.length > 0) {
+            return res.json({ success: true, accion: resultado.rows[0].comando_kiosko });
+        }
+
+        return res.json({ success: true, accion: 'none' });
+
+    } catch (error) {
+        console.error('Error en getComandoKiosko:', error);
+        res.status(500).json({ success: false, message: 'Error al consultar comando de kiosko' });
+    }
+}
+
+/**
+ * GET /api/escritorio/:id/comando-watchdog
+ * Obtiene el comando pendiente para el watchdog (y lo limpia atómicamente)
+ */
+export async function getComandoWatchdog(req, res) {
+    try {
+        const { id } = req.params;
+
+        const resultado = await pool.query(`
+            WITH comando_pendiente AS (
+                SELECT id, comando_watchdog 
+                FROM escritorio 
+                WHERE id = $1 AND empresa_id = $2 AND comando_watchdog != 'none'
+                FOR UPDATE
+            )
+            UPDATE escritorio 
+            SET comando_watchdog = 'none' 
+            FROM comando_pendiente
+            WHERE escritorio.id = comando_pendiente.id
+            RETURNING comando_pendiente.comando_watchdog
+        `, [id, req.empresa_id]);
+
+        if (resultado.rows.length > 0) {
+            return res.json({ success: true, accion: resultado.rows[0].comando_watchdog });
+        }
+
+        return res.json({ success: true, accion: 'none' });
+
+    } catch (error) {
+        console.error('Error en getComandoWatchdog:', error);
+        res.status(500).json({ success: false, message: 'Error al consultar comando de watchdog' });
+    }
+}
+
+/**
+ * POST /api/escritorio/:id/comando
+ * Administrador: Envía un comando a la cola del kiosko o watchdog
+ */
+export async function sendComando(req, res) {
+    try {
+        const { id } = req.params;
+        const { objetivo, accion } = req.body;
+
+        if (!['kiosko', 'watchdog'].includes(objetivo)) {
+            return res.status(400).json({ success: false, message: 'Objetivo no válido' });
+        }
+        const accionesPermitidas = {
+            kiosko: ['none', 'shutdown', 'restart'],
+            watchdog: ['none', 'start']
+        };
+
+        if (!accionesPermitidas[objetivo].includes(accion)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Acción '${accion}' no permitida para objetivo '${objetivo}'. Permitidas: ${accionesPermitidas[objetivo].join(', ')}` 
+            });
+        }
+
+        const campo = objetivo === 'kiosko' ? 'comando_kiosko' : 'comando_watchdog';
+
+        const resultado = await pool.query(`
+            UPDATE escritorio 
+            SET ${campo} = $1 
+            WHERE id = $2 AND empresa_id = $3
+            RETURNING id
+        `, [accion, id, req.empresa_id]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Dispositivo no encontrado o sin acceso' });
+        }
+
+        // Registrar evento opcional aquí si es necesario
+        await registrarEvento({
+            titulo: 'Comando remoto enviado',
+            descripcion: `Comando '${accion}' enviado al ${objetivo}`,
+            tipo_evento: TIPOS_EVENTO.DISPOSITIVO,
+            prioridad: PRIORIDADES.BAJA,
+            usuario_modificador_id: req.usuario?.id,
+            detalles: { escritorio_id: id, objetivo, accion }
+        });
+
+        res.json({ success: true, message: 'Comando guardado en la red exitosamente' });
+
+    } catch (error) {
+        console.error('Error en sendComando:', error);
+        res.status(500).json({ success: false, message: 'Error al enviar comando' });
     }
 }

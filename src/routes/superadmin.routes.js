@@ -12,3 +12,4 @@ router.use(requireSaaSOwner);
 router.post('/', createSuperAdmin);
 
 export default router;
+

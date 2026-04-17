@@ -22,3 +22,4 @@ router.put('/:id', updateEmpresa);
 router.delete('/:id', deleteEmpresa);
 
 export default router;
+

@@ -15,3 +15,4 @@ router.get('/:id', requirePermiso('REGISTRO_VER'), getEventoById);
 router.post('/', requirePermiso('REGISTRO_VER'), createEvento);
 
 export default router;
+

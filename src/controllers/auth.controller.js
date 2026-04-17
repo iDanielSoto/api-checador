@@ -182,9 +182,10 @@ export async function login(req, res) {
             ORDER BY r.posicion ASC
         `, [usuarioData.id]);
 
-        // Combinar permisos de todos los roles
+        // Combinar permisos de todos los roles y determinar mejor rango (posición mínima)
         let permisosCombinadosBigInt = BigInt(0);
         let esAdmin = false;
+        let mejorPosicion = 999; // Valor base
 
         for (const rol of rolesResult.rows) {
             if (rol.permisos_bitwise) {
@@ -192,6 +193,10 @@ export async function login(req, res) {
             }
             if (rol.es_admin) {
                 esAdmin = true;
+            }
+            const pos = parseInt(rol.posicion);
+            if (!isNaN(pos) && pos < mejorPosicion) {
+                mejorPosicion = pos;
             }
         }
 
@@ -245,6 +250,7 @@ export async function login(req, res) {
                     posicion: r.posicion
                 })),
                 permisos: permisosCombinadosBigInt.toString(),
+                mejorPosicion,
                 esAdmin,
                 token: token
             }
@@ -351,6 +357,7 @@ export async function impersonarEmpresa(req, res) {
                     id: r.id, nombre: r.nombre, es_admin: r.es_admin, posicion: r.posicion
                 })),
                 permisos: permisosCombinadosBigInt.toString(),
+                mejorPosicion,
                 esAdmin,
                 token: token
             }
@@ -506,6 +513,7 @@ export async function verificarSesion(req, res) {
                 },
                 roles: req.usuario.roles,
                 permisos: req.usuario.permisos,
+                mejorPosicion: req.usuario.mejorPosicion,
                 esAdmin: req.usuario.esAdmin,
                 esPropietarioSaaS: req.usuario.esPropietarioSaaS
             }
@@ -667,9 +675,12 @@ export async function loginBiometrico(req, res) {
 
         let permisosCombinadosBigInt = BigInt(0);
         let esAdmin = false;
+        let mejorPosicion = 999;
         for (const rol of rolesResult.rows) {
             if (rol.permisos_bitwise) permisosCombinadosBigInt |= BigInt(rol.permisos_bitwise);
             if (rol.es_admin) esAdmin = true;
+            const pos = parseInt(rol.posicion);
+            if (!isNaN(pos) && pos < mejorPosicion) mejorPosicion = pos;
         }
 
         // Registrar evento de login biométrico
@@ -723,6 +734,7 @@ export async function loginBiometrico(req, res) {
                     posicion: r.posicion
                 })),
                 permisos: permisosCombinadosBigInt.toString(),
+                mejorPosicion,
                 esAdmin,
                 token: token
             }

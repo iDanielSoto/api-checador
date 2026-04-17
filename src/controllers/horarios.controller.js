@@ -92,6 +92,17 @@ export async function asignarHorario(req, res) {
             });
         }
 
+        // Obtener los horarios actuales de los empleados antes de cambiarlos (para el log histórico)
+        const horariosPrevios = await client.query(`
+            SELECT id, horario_id FROM empleados 
+            WHERE id = ANY($1)
+        `, [empleados_ids]);
+
+        const mapeoHorariosPrevios = {};
+        horariosPrevios.rows.forEach(row => {
+            mapeoHorariosPrevios[row.id] = row.horario_id;
+        });
+
         // Asignar el horario a los empleados
         // Nota: empleados no tiene empresa_id, se verifica a través de usuarios
         const resultado = await client.query(`
@@ -119,9 +130,13 @@ export async function asignarHorario(req, res) {
             descripcion: `Se asignó el horario ${horario_id} a ${resultado.rows.length} empleado(s).`,
             tipo_evento: TIPOS_EVENTO.HORARIO,
             prioridad: PRIORIDADES.MEDIA,
-            empleado_id: empleados_ids[0], // Podríamos registrar para el primer empleado o iterar
+            empleado_id: empleados_ids[0],
             usuario_modificador_id: req.usuario?.id,
-            detalles: { horario_id, empleados_ids: resultado.rows.map(row => row.id) }
+            detalles: { 
+                horario_id, 
+                empleados_ids: resultado.rows.map(row => row.id),
+                horarios_anteriores: mapeoHorariosPrevios // Guardamos el historial en el log
+            }
         });
 
         res.json({
@@ -461,6 +476,13 @@ export async function createHorario(req, res) {
 
         const targetIds = empleados_ids || (empleado_id ? [empleado_id] : []);
 
+        // Obtener horarios previos para el log
+        let mapeoHorariosPrevios = {};
+        if (targetIds.length > 0) {
+            const previosRes = await client.query(`SELECT id, horario_id FROM empleados WHERE id = ANY($1)`, [targetIds]);
+            previosRes.rows.forEach(r => mapeoHorariosPrevios[r.id] = r.horario_id);
+        }
+
         // Asignar el horario a los empleados
         if (targetIds.length > 0) {
             await client.query(`
@@ -475,12 +497,17 @@ export async function createHorario(req, res) {
         // Registrar evento
         await registrarEvento({
             titulo: 'Horario creado',
-            descripcion: `Se creó y asignó un nuevo horario al empleado ${empleado_id}`,
+            descripcion: `Se creó y asignó un nuevo horario al empleado ${empleado_id || targetIds[0]}`,
             tipo_evento: TIPOS_EVENTO.HORARIO,
             prioridad: PRIORIDADES.MEDIA,
-            empleado_id: empleado_id,
+            empleado_id: empleado_id || targetIds[0],
             usuario_modificador_id: req.usuario?.id,
-            detalles: { horario_id: id, fecha_inicio, fecha_fin }
+            detalles: { 
+                horario_id: id, 
+                fecha_inicio, 
+                fecha_fin,
+                horarios_anteriores: mapeoHorariosPrevios
+            }
         });
 
         res.status(201).json({

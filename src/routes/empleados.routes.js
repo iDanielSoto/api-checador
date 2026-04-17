@@ -31,7 +31,7 @@ router.get('/buscar/nss/:nss', requirePermiso('USUARIO_VER'), buscarPorNSS);
 // CRUD empleados
 router.get('/', requirePermiso('USUARIO_VER'), getEmpleados);
 router.get('/:id', requirePermisoOrSelf('id', 'USUARIO_VER'), getEmpleadoById);
-router.put('/:id', validate(updateEmpleadoSchema), requirePermiso('USUARIO_MODIFICAR'), updateEmpleado);
+router.put('/:id', validate(updateEmpleadoSchema), requirePermiso('USUARIO_EDITAR'), updateEmpleado);
 
 // Gestión de departamentos
 router.get('/:id/departamentos', requirePermisoOrSelf('id', 'DEPARTAMENTO_VER'), getDepartamentosDeEmpleado);
@@ -46,3 +46,4 @@ router.get('/:id/avisos', requirePermisoOrSelf('id', 'USUARIO_VER'), getAvisosDe
 
 
 export default router;
+

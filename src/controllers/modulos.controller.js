@@ -1,34 +1,22 @@
 import { pool } from '../config/db.js';
+import { CATALOGO_MODULOS, tienePermiso, PERMISOS } from '../utils/permissions.js';
 
 /**
  * GET /api/modulos
- * Obtiene todos los módulos activos
+ * Obtiene todos los módulos activos desde el código
  */
 export async function getModulos(req, res) {
     try {
-        const resultado = await pool.query(`
-            SELECT
-                codigo,
-                descripcion,
-                icono,
-                orden,
-                es_activo,
-                fecha_registro
-            FROM modulos
-            WHERE es_activo = true
-            ORDER BY orden ASC
-        `);
-
         // Mapear a formato esperado por el frontend
-        const modulos = resultado.rows.map(m => ({
-            id: m.codigo,
-            codigo: m.codigo,
-            nombre: m.descripcion,
-            descripcion: m.descripcion,
+        const modulos = CATALOGO_MODULOS.map(m => ({
+            id: m.id,
+            codigo: m.id,
+            nombre: m.nombre,
+            descripcion: m.nombre,
             icono: m.icono,
-            ruta: `/${m.codigo}`,
+            ruta: m.ruta,
             orden: m.orden,
-            es_activo: m.es_activo
+            es_activo: true
         }));
 
         res.json({
@@ -51,32 +39,43 @@ export async function getModulos(req, res) {
  */
 export async function getModulosMenu(req, res) {
     try {
-        const resultado = await pool.query(`
-            SELECT
-                codigo,
-                descripcion,
-                icono,
-                orden
-            FROM modulos
-            WHERE es_activo = true
-            ORDER BY orden ASC
-        `);
+        const usuarioPermisos = req.usuario?.permisosBigInt || BigInt(0);
+        const esAdminMaster = req.usuario?.empresa_id === 'MASTER' || req.usuario?.esPropietarioSaaS;
+
+        // Mapeo interno de módulo a permiso requerido para verlo
+        const moduloARequisito = {
+            'dashboard': null, // Siempre visible
+            'usuarios': PERMISOS.USUARIO_VER,
+            'empleados': PERMISOS.USUARIO_VER,
+            'asistencias': PERMISOS.REGISTRO_VER,
+            'horarios': PERMISOS.HORARIO_VER,
+            'departamentos': PERMISOS.DEPARTAMENTO_VER,
+            'dispositivos': PERMISOS.DISPOSITIVO_VER,
+            'avisos': PERMISOS.AVISO_VER,
+            'reportes': PERMISOS.REPORTE_VER,
+            'configuracion': PERMISOS.CONFIG_VER
+        };
+
+        const modulosFiltrados = CATALOGO_MODULOS.filter(m => {
+            if (esAdminMaster) return true;
+            const permisoReq = moduloARequisito[m.id];
+            if (permisoReq === null || permisoReq === undefined) return true;
+            return tienePermiso(usuarioPermisos, permisoReq);
+        });
 
         // Mapear a formato esperado por el frontend
-        const modulos = resultado.rows.map(m => ({
-            id: m.codigo,
-            codigo: m.codigo,
-            nombre: m.descripcion,
+        const data = modulosFiltrados.map(m => ({
+            id: m.id,
+            codigo: m.id,
+            nombre: m.nombre,
             icono: m.icono,
-            ruta: m.codigo === 'home' ? '/' : `/${m.codigo}`,
+            ruta: m.ruta,
             orden: m.orden
         }));
 
-        // Si hay usuario autenticado, podemos filtrar por permisos
-        // Por ahora devolvemos todos los activos
         res.json({
             success: true,
-            data: modulos
+            data: data
         });
 
     } catch (error) {
@@ -89,205 +88,24 @@ export async function getModulosMenu(req, res) {
 }
 
 /**
- * GET /api/modulos/:codigo
- * Obtiene un módulo por código
+ * Funciones de gestión de módulos (DEPRECADAS)
+ * Los módulos ahora son estáticos en el código.
  */
 export async function getModuloById(req, res) {
-    try {
-        const { id } = req.params;
-
-        const resultado = await pool.query(`
-            SELECT
-                codigo,
-                descripcion,
-                icono,
-                orden,
-                es_activo,
-                fecha_registro
-            FROM modulos
-            WHERE codigo = $1
-        `, [id]);
-
-        if (resultado.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Módulo no encontrado'
-            });
-        }
-
-        const m = resultado.rows[0];
-        res.json({
-            success: true,
-            data: {
-                id: m.codigo,
-                codigo: m.codigo,
-                nombre: m.descripcion,
-                descripcion: m.descripcion,
-                icono: m.icono,
-                ruta: `/${m.codigo}`,
-                orden: m.orden,
-                es_activo: m.es_activo,
-                fecha_registro: m.fecha_registro
-            }
-        });
-
-    } catch (error) {
-        console.error('Error en getModuloById:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al obtener módulo'
-        });
-    }
+    const { id } = req.params;
+    const modulo = CATALOGO_MODULOS.find(m => m.id === id);
+    if (!modulo) return res.status(404).json({ success: false, message: 'Módulo no encontrado' });
+    res.json({ success: true, data: { ...modulo, codigo: modulo.id, es_activo: true } });
 }
 
-/**
- * POST /api/modulos
- * Crea un nuevo módulo
- */
 export async function createModulo(req, res) {
-    try {
-        const {
-            codigo,
-            descripcion,
-            icono,
-            orden = 0,
-            es_activo = true
-        } = req.body;
-
-        if (!codigo || !descripcion) {
-            return res.status(400).json({
-                success: false,
-                message: 'Código y descripción son requeridos'
-            });
-        }
-
-        // Verificar que el código no exista
-        const existente = await pool.query(
-            'SELECT codigo FROM modulos WHERE codigo = $1',
-            [codigo]
-        );
-
-        if (existente.rows.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Ya existe un módulo con ese código'
-            });
-        }
-
-        const resultado = await pool.query(`
-            INSERT INTO modulos (codigo, descripcion, icono, orden, es_activo)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING *
-        `, [codigo, descripcion, icono, orden, es_activo]);
-
-        const m = resultado.rows[0];
-        res.status(201).json({
-            success: true,
-            message: 'Módulo creado correctamente',
-            data: {
-                id: m.codigo,
-                codigo: m.codigo,
-                nombre: m.descripcion,
-                icono: m.icono,
-                ruta: `/${m.codigo}`,
-                orden: m.orden,
-                es_activo: m.es_activo
-            }
-        });
-
-    } catch (error) {
-        console.error('Error en createModulo:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al crear módulo'
-        });
-    }
+    res.status(405).json({ success: false, message: 'La creación de módulos está deshabilitada (Catálogo estático)' });
 }
 
-/**
- * PUT /api/modulos/:codigo
- * Actualiza un módulo existente
- */
 export async function updateModulo(req, res) {
-    try {
-        const { id } = req.params;
-        const {
-            descripcion,
-            icono,
-            orden,
-            es_activo
-        } = req.body;
-
-        const resultado = await pool.query(`
-            UPDATE modulos SET
-                descripcion = COALESCE($1, descripcion),
-                icono = COALESCE($2, icono),
-                orden = COALESCE($3, orden),
-                es_activo = COALESCE($4, es_activo)
-            WHERE codigo = $5
-            RETURNING *
-        `, [descripcion, icono, orden, es_activo, id]);
-
-        if (resultado.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Módulo no encontrado'
-            });
-        }
-
-        const m = resultado.rows[0];
-        res.json({
-            success: true,
-            message: 'Módulo actualizado correctamente',
-            data: {
-                id: m.codigo,
-                codigo: m.codigo,
-                nombre: m.descripcion,
-                icono: m.icono,
-                ruta: `/${m.codigo}`,
-                orden: m.orden,
-                es_activo: m.es_activo
-            }
-        });
-
-    } catch (error) {
-        console.error('Error en updateModulo:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al actualizar módulo'
-        });
-    }
+    res.status(405).json({ success: false, message: 'La edición de módulos está deshabilitada (Catálogo estático)' });
 }
 
-/**
- * DELETE /api/modulos/:codigo
- * Elimina un módulo (soft delete)
- */
 export async function deleteModulo(req, res) {
-    try {
-        const { id } = req.params;
-
-        const resultado = await pool.query(`
-            UPDATE modulos SET es_activo = false WHERE codigo = $1 RETURNING codigo
-        `, [id]);
-
-        if (resultado.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Módulo no encontrado'
-            });
-        }
-
-        res.json({
-            success: true,
-            message: 'Módulo eliminado correctamente'
-        });
-
-    } catch (error) {
-        console.error('Error en deleteModulo:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al eliminar módulo'
-        });
-    }
+    res.status(405).json({ success: false, message: 'La eliminación de módulos está deshabilitada (Catálogo estático)' });
 }
