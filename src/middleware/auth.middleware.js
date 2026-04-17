@@ -69,13 +69,34 @@ export async function verificarAutenticacion(req, res, next) {
         // Detección de Usuario Regular (Multi-Tenant)
         // Soporta JWT (nuevo) y userId directo (legacy)
         // ==========================================
-        let userId = token;
+        let jwtPayload = null;
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_secret');
             userId = decoded.sub;
+            jwtPayload = decoded;
         } catch (jwtErr) {
             // No es JWT, usar token como userId directo (legacy)
             userId = token;
+        }
+
+        // ==========================================
+        // Detección de Dispositivos (Kiosko, Movil, Escritorio)
+        // ==========================================
+        if (jwtPayload && jwtPayload.roles && (jwtPayload.roles.includes('Kiosko') || jwtPayload.roles.includes('Movil') || jwtPayload.roles.includes('Escritorio'))) {
+            req.usuario = {
+                id: userId,
+                usuario: `SISTEMA_${jwtPayload.roles[0].toUpperCase()}`,
+                nombre: `Dispositivo ${jwtPayload.roles[0]}`,
+                es_empleado: false,
+                empleado_id: null,
+                empresa_id: jwtPayload.empresa_id,
+                esAdmin: false,
+                roles: [{ nombre: jwtPayload.roles[0], es_admin: false, posicion: 0 }],
+                permisos: jwtPayload.permisos || '1',
+                permisosBigInt: BigInt(jwtPayload.permisos || 1)
+            };
+            req.empresa_id = jwtPayload.empresa_id;
+            return next();
         }
 
         const resultado = await pool.query(`

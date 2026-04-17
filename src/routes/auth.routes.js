@@ -7,7 +7,9 @@ import {
     cambiarPassword,
     loginBiometrico,
     impersonarEmpresa,
-    tokenKiosco
+    tokenKiosco,
+    tokenMovil,
+    tokenEscritorio
 } from '../controllers/auth.controller.js';
 import { verificarAutenticacion } from '../middleware/auth.middleware.js';
 
@@ -18,6 +20,8 @@ router.post('/login', login);
 router.post('/login-saas', loginSaaS);
 router.post('/biometric', loginBiometrico);
 router.post('/token-kiosco', tokenKiosco);
+router.post('/token-movil', tokenMovil);
+router.post('/token-escritorio', tokenEscritorio);
 
 // Rutas protegidas (requieren autenticación)
 router.post('/logout', verificarAutenticacion, logout);

@@ -829,3 +829,169 @@ export async function tokenKiosco(req, res) {
         });
     }
 }
+
+/**
+ * POST /api/auth/token-movil
+ * Obtiene un token de acceso para la aplicación móvil basado en el identificador único de la empresa
+ */
+export async function tokenMovil(req, res) {
+    try {
+        const { identificador } = req.body;
+
+        if (!identificador) {
+            return res.status(400).json({
+                success: false,
+                message: 'El identificador de la empresa es requerido'
+            });
+        }
+
+        // Buscar empresa por identificador
+        const resultado = await pool.query(`
+            SELECT id, nombre, identificador, es_activo, configuracion_id
+            FROM empresas 
+            WHERE identificador = $1
+        `, [identificador]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No se encontró la empresa con ese identificador'
+            });
+        }
+
+        const empresaData = resultado.rows[0];
+
+        if (!empresaData.es_activo) {
+            return res.status(403).json({
+                success: false,
+                message: 'La empresa se encuentra inactiva'
+            });
+        }
+
+        // Registrar evento de login de móvil
+        await registrarEvento({
+            titulo: 'Inicio de sesión Móvil',
+            descripcion: `Conexión autorizada para móvil de ${empresaData.nombre} (${identificador})`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.BAJA,
+            detalles: { identificador, empresa_id: empresaData.id }
+        });
+
+        // Generar JWT con permisos generales de móvil
+        const token = jwt.sign(
+            {
+                sub: `MOVIL_${identificador}`,
+                usuario: 'MOVIL_SYSTEM',
+                empresa_id: empresaData.id,
+                esAdmin: false,
+                roles: ['Movil'],
+                permisos: '1' // Por ejemplo, un bit de "solo checar"
+            },
+            process.env.JWT_SECRET || 'default_secret',
+            { expiresIn: '365d' } // Sesiones largas
+        );
+
+        res.json({
+            success: true,
+            message: 'Conexión de móvil exitosa',
+            data: {
+                empresa: {
+                    id: empresaData.id,
+                    nombre: empresaData.nombre,
+                    identificador: empresaData.identificador
+                },
+                token: token
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en tokenMovil:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error interno del servidor al generar token de móvil'
+        });
+    }
+}
+
+/**
+ * POST /api/auth/token-escritorio
+ * Obtiene un token de acceso para la aplicación de escritorio basado en el identificador único de la empresa
+ */
+export async function tokenEscritorio(req, res) {
+    try {
+        const { identificador } = req.body;
+
+        if (!identificador) {
+            return res.status(400).json({
+                success: false,
+                message: 'El identificador de la empresa es requerido'
+            });
+        }
+
+        // Buscar empresa por identificador
+        const resultado = await pool.query(`
+            SELECT id, nombre, identificador, es_activo, configuracion_id
+            FROM empresas 
+            WHERE identificador = $1
+        `, [identificador]);
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No se encontró la empresa con ese identificador'
+            });
+        }
+
+        const empresaData = resultado.rows[0];
+
+        if (!empresaData.es_activo) {
+            return res.status(403).json({
+                success: false,
+                message: 'La empresa se encuentra inactiva'
+            });
+        }
+
+        // Registrar evento de login de escritorio
+        await registrarEvento({
+            titulo: 'Inicio de sesión Escritorio',
+            descripcion: `Conexión autorizada para escritorio de ${empresaData.nombre} (${identificador})`,
+            tipo_evento: TIPOS_EVENTO.AUTENTICACION,
+            prioridad: PRIORIDADES.BAJA,
+            detalles: { identificador, empresa_id: empresaData.id }
+        });
+
+        // Generar JWT con permisos generales de escritorio
+        const token = jwt.sign(
+            {
+                sub: `ESCRITORIO_${identificador}`,
+                usuario: 'ESCRITORIO_SYSTEM',
+                empresa_id: empresaData.id,
+                esAdmin: false,
+                roles: ['Escritorio'],
+                permisos: '1' // Por ejemplo, un bit de "solo checar"
+            },
+            process.env.JWT_SECRET || 'default_secret',
+            { expiresIn: '365d' } // Sesiones largas
+        );
+
+        res.json({
+            success: true,
+            message: 'Conexión de escritorio exitosa',
+            data: {
+                empresa: {
+                    id: empresaData.id,
+                    nombre: empresaData.nombre,
+                    identificador: empresaData.identificador
+                },
+                token: token
+            }
+        });
+
+    } catch (error) {
+        console.error('Error en tokenEscritorio:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error interno del servidor al generar token de escritorio'
+        });
+    }
+}
