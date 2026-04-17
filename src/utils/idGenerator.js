@@ -27,7 +27,8 @@ export const ID_PREFIXES = {
     EMP_DEPTO: 'EDO',
     AUDITORIA: 'AUD',
     DIA_FESTIVO: 'FES',
-    AVISO: 'AVI'
+    AVISO: 'AVI',
+    LOG: 'LOG'
 };
 
 /**
@@ -56,7 +57,8 @@ const SEQUENCE_NAMES = {
     EDO: 'seq_empleados_departamentos',
     AUD: 'seq_auditoria',
     FES: 'seq_dias_festivos',
-    AVI: 'seq_avisos'
+    AVI: 'seq_avisos',
+    LOG: 'seq_system_logs'
 };
 
 /**

@@ -69,6 +69,7 @@ export async function verificarAutenticacion(req, res, next) {
         // Detección de Usuario Regular (Multi-Tenant)
         // Soporta JWT (nuevo) y userId directo (legacy)
         // ==========================================
+        let userId = token;
         let jwtPayload = null;
         let userId;
         try {
