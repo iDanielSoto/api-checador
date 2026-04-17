@@ -4,6 +4,13 @@ import { logSystemEvent, LOG_LEVELS } from '../utils/logger.js';
 export const errorHandler = async (err, req, res, next) => {
     console.error('Error no controlado por Express:', err);
 
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        return res.status(400).json({
+            success: false,
+            message: 'El formato JSON de la petición es inválido'
+        });
+    }
+
     // Intentar registrar en BD para el SaaS Dashboard
     await logSystemEvent({
         nivel: LOG_LEVELS.ERROR,
